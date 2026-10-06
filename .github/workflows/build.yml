@@ -8,7 +8,7 @@ on:
 
 jobs:
   build:
-    runs-on: windows-latest
+    runs-on: windows-2022
 
     steps:
       - name: Checkout
@@ -29,7 +29,7 @@ jobs:
       - name: List outputs
         if: always()
         run: |
-          Get-ChildItem -Recurse x64/Release | Select-Object FullName -First 50
+          if (Test-Path x64/Release) { Get-ChildItem -Recurse x64/Release | Select-Object FullName -First 50 } else { echo "no x64/Release outputs" }
         shell: pwsh
 
       - name: Upload MSIX + exe
