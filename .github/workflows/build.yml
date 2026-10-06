@@ -1,0 +1,44 @@
+name: Build WinUI 3 (C++)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Setup NuGet
+        uses: NuGet/setup-nuget@v2
+
+      - name: Restore NuGet (vcxproj PackageReference)
+        run: msbuild PretClient.sln /t:Restore /p:Configuration=Release /p:Platform=x64
+
+      - name: Build x64 Release (unsigned MSIX for CI)
+        run: msbuild PretClient.sln /p:Configuration=Release /p:Platform=x64 /p:AppxPackageSigningEnabled=false /p:AppxTestSigningEnabled=false /p:AppxBundle=Never /p:GenerateAppxPackageOnBuild=true /verbosity:minimal
+
+      - name: List outputs
+        if: always()
+        run: |
+          Get-ChildItem -Recurse x64/Release | Select-Object FullName -First 50
+        shell: pwsh
+
+      - name: Upload MSIX + exe
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: PretClient-x64-Release
+          path: |
+            x64/Release/**/*.msix
+            x64/Release/**/*.exe
+            x64/Release/AppxManifest.xml
+          if-no-files-found: warn
