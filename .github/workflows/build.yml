@@ -20,11 +20,8 @@ jobs:
       - name: Setup NuGet
         uses: NuGet/setup-nuget@v2
 
-      - name: Restore NuGet (vcxproj PackageReference)
-        run: msbuild PretClient.sln /t:Restore /p:Configuration=Release /p:Platform=x64
-
       - name: Build x64 Release (unsigned MSIX for CI)
-        run: msbuild PretClient.sln /p:Configuration=Release /p:Platform=x64 /p:AppxPackageSigningEnabled=false /p:AppxTestSigningEnabled=false /p:AppxBundle=Never /p:GenerateAppxPackageOnBuild=true /verbosity:minimal
+        run: msbuild PretClient.sln /restore /p:Configuration=Release /p:Platform=x64 /p:AppxPackageSigningEnabled=false /p:AppxTestSigningEnabled=false /p:AppxBundle=Never /p:GenerateAppxPackageOnBuild=true /verbosity:minimal
 
       - name: List outputs
         if: always()
