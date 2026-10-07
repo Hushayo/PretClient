@@ -23,6 +23,11 @@ using namespace Microsoft::UI::Xaml::Input;
 using namespace Microsoft::UI::Xaml::Shapes;
 using namespace Windows::Foundation;
 
+// Polyline exists in both the WinUI and the SDK XAML Shapes namespaces, so the
+// using-directives above make the bare name ambiguous. An alias-declaration
+// wins over using-directive lookup and pins the WinUI one everywhere.
+using Polyline = Microsoft::UI::Xaml::Shapes::Polyline;
+
 namespace winrt::PretClient
 {
     namespace
@@ -1184,16 +1189,13 @@ namespace winrt::PretClient
             {
                 m_ui.TryEnqueue([this] {
                     try
-                    {
-                        if (m_dScroll)
-                        {
-                            double v = m_dScroll.ScrollableHeight();
-                            m_dScroll.ChangeView(nullptr, box_value(v), nullptr);
-                        }
-                    }
-                    catch (...)
-                    {
-                    }
+                {
+                    if (m_dScroll)
+                        m_dScroll.ScrollToEnd();
+                }
+                catch (...)
+                {
+                }
                 });
             }
             catch (...)
@@ -1226,10 +1228,10 @@ namespace winrt::PretClient
     fire_and_forget LocalServerPage::StartServer(hstring id)
     {
         if (id.empty() || Server::ConsoleRunning(id))
-            return;
+            co_return;
         auto entry = FindEntry(id);
         if (entry.id.empty())
-            return;
+            co_return;
         auto dir = Server::ServersDir() / std::wstring{ id };
         auto jar = Server::FindServerJar(dir);
         if (jar.empty())
@@ -1237,7 +1239,7 @@ namespace winrt::PretClient
             SetStatus(L"No server jar found - open the Folder and check the install.");
             if (id == m_detailId && m_dStatus)
                 m_dStatus.Text(L"No server jar found - open the Folder and check the install.");
-            return;
+            co_return;
         }
         SetStatus(L"Starting server...");
         if (id == m_detailId && m_dStatus)
@@ -1341,10 +1343,7 @@ namespace winrt::PretClient
                 try
                 {
                     if (m_dScroll)
-                    {
-                        double v = m_dScroll.ScrollableHeight();
-                        m_dScroll.ChangeView(nullptr, box_value(v), nullptr);
-                    }
+                        m_dScroll.ScrollToEnd();
                 }
                 catch (...)
                 {
