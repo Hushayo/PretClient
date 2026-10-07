@@ -458,7 +458,9 @@ namespace winrt::PretClient
             gamelog.BorderBrush(Theme::CardStroke());
             gamelog.CornerRadius(CornerRadiusHelper::FromUniformRadius(8));
             gamelog.Padding(ThicknessHelper::FromUniformLength(8));
-            gamelog.Visibility(running ? Visibility::Visible : Visibility::Collapsed);
+            // Starts collapsed; UpdateStatsAsync shows it only when there is
+            // actually log text (an empty-but-visible box reads as broken).
+            gamelog.Visibility(Visibility::Collapsed);
             gamelog.Header(box_value(L"Client log"));
             body.Children().Append(gamelog);
 
@@ -1393,8 +1395,9 @@ namespace winrt::PretClient
                 preparingSnap.push_back(
                     m_preparing.find(std::wstring{ card.id }) != m_preparing.end());
             }
-            auto logFile = std::filesystem::path{ std::wstring{ EffectiveGameDir(LoadSettings()) } } /
-                L"logs-pretclient" / L"latest.txt";
+            auto logBase = std::filesystem::path{ std::wstring{ EffectiveGameDir(LoadSettings()) } };
+            auto logFile = logBase / L"logs-pretclient" / L"latest.txt";
+            auto logGame = logBase / L"logs" / L"latest.log";
 
             co_await winrt::resume_background();
             // Everything below may block (PDH, process queries, disk reads)
@@ -1426,6 +1429,8 @@ namespace winrt::PretClient
                 r.cpu = m_sampler.PollProcessCpu(r.handle);
                 r.ram = m_sampler.ProcessPrivateBytes(r.handle);
                 r.tail = TailText(logFile);
+                if (r.tail.empty())
+                    r.tail = TailText(logGame); // log4j file log: written even when the stdout redirect yields nothing
                 rows.push_back(std::move(r));
             }
 

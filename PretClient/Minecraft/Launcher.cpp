@@ -408,16 +408,17 @@ namespace winrt::PretClient::Launcher
             auto logFile = logDir / L"latest.txt";
             HANDLE logH = CreateFileW(logFile.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
                 nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+            bool logOk = (logH != nullptr && logH != INVALID_HANDLE_VALUE);
             STARTUPINFOW si{ sizeof(si) };
             si.dwFlags = STARTF_USESHOWWINDOW | STARTF_USESTDHANDLES;
             si.wShowWindow = SW_HIDE;
-            si.hStdOutput = logH ? logH : GetStdHandle(STD_OUTPUT_HANDLE);
+            si.hStdOutput = logOk ? logH : GetStdHandle(STD_OUTPUT_HANDLE);
             si.hStdError = si.hStdOutput;
             PROCESS_INFORMATION pi{};
             std::wstring line = Quote(std::wstring{ cmd.exe }) + L" " + std::wstring{ cmd.args };
             BOOL ok = CreateProcessW(nullptr, line.data(), nullptr, nullptr, TRUE, CREATE_NO_WINDOW,
                 nullptr, std::wstring{ cmd.workDir }.c_str(), &si, &pi);
-            if (logH)
+            if (logOk)
                 CloseHandle(logH);
             if (!ok)
             {
