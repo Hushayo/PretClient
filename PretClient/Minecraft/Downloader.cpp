@@ -678,7 +678,7 @@ namespace winrt::PretClient::Downloader
                     }
                     log(kindName + hstring{ L" installer running (can take a few minutes)..." });
                     prog(kindName + hstring{ L" installer" }, 0, 0, 0.0);
-                    auto installLog = gamePath / L"logs-pretclient" / installLogName;
+                    auto installLog = gamePath / L"logs-pretclient" / std::wstring{ installLogName };
                     int exit = co_await RunInstallerAsync(javaExe, installerJar, gamePath, installLog);
                     game.loaderProfile = ReadProfileFile(loaderJson);
                     if (!HasLoaderMain(game.loaderProfile))
