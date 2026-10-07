@@ -55,6 +55,22 @@ namespace winrt::PretClient
         m_mem.Items().Append(box_value(L"8192 MB"));
         m_inner.Children().Append(m_mem);
 
+        TextBlock perfHead{};
+        perfHead.Text(L"Performance");
+        m_inner.Children().Append(perfHead);
+
+        m_fpsBoost.Content(box_value(L"FPS boost (tuned GC flags)"));
+        m_inner.Children().Append(m_fpsBoost);
+
+        m_highPriority.Content(box_value(L"Run game above-normal priority"));
+        m_inner.Children().Append(m_highPriority);
+
+        m_extraJvm.Header(box_value(L"Extra JVM args (optional)"));
+        m_extraJvm.PlaceholderText(L"e.g. -XX:G1HeapRegionSize=16M");
+        m_extraJvm.TextWrapping(TextWrapping::Wrap);
+        m_extraJvm.AcceptsReturn(false);
+        m_inner.Children().Append(m_extraJvm);
+
         Button save{};
         save.Content(box_value(L"Save"));
         save.Style(Application::Current().Resources().Lookup(box_value(L"AccentButtonStyle")).as<Style>());
@@ -70,6 +86,9 @@ namespace winrt::PretClient
             int idx = m_mem.SelectedIndex();
             s.maxMemMb = (idx >= 0 && idx < 4) ? mems[idx] : 2048;
             s.minMemMb = 512;
+            s.fpsBoost = unbox_value_or<bool>(m_fpsBoost.IsChecked(), true);
+            s.highPriority = unbox_value_or<bool>(m_highPriority.IsChecked(), true);
+            s.extraJvmArgs = m_extraJvm.Text();
             SaveSettings(s);
             SetStatus(L"Saved.");
         });
@@ -123,6 +142,9 @@ namespace winrt::PretClient
         else if (s.maxMemMb <= 1024)
             idx = 0;
         m_mem.SelectedIndex(idx);
+        m_fpsBoost.IsChecked(box_value(s.fpsBoost));
+        m_highPriority.IsChecked(box_value(s.highPriority));
+        m_extraJvm.Text(s.extraJvmArgs);
     }
 
     void SettingsPage::SetStatus(hstring const& line)

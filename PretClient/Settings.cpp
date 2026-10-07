@@ -68,10 +68,30 @@ namespace winrt::PretClient
                     s.maxMemMb = static_cast<int>(o.GetNamedNumber(L"maxMemMb"));
                 if (o.HasKey(L"minMemMb"))
                     s.minMemMb = static_cast<int>(o.GetNamedNumber(L"minMemMb"));
+                // Bool may be stored as Boolean or Number (older builds).
+                auto getBool = [&](wchar_t const* k, bool fb) {
+                    try
+                    {
+                        if (!o.HasKey(k))
+                            return fb;
+                        auto v = o.GetNamedValue(k);
+                        if (v.ValueType() == JsonValueType::Boolean)
+                            return v.GetBoolean();
+                        if (v.ValueType() == JsonValueType::Number)
+                            return v.GetNumber() != 0.0;
+                    }
+                    catch (...)
+                    {
+                    }
+                    return fb;
+                };
+                s.fpsBoost = getBool(L"fpsBoost", true);
+                s.highPriority = getBool(L"highPriority", true);
             }
             catch (...)
             {
             }
+            s.extraJvmArgs = str(L"extraJvmArgs", L"");
         }
         catch (...)
         {
@@ -109,6 +129,9 @@ namespace winrt::PretClient
         o.SetNamedValue(L"curseforgeKey", JsonValue::CreateStringValue(s.curseforgeKey));
         o.SetNamedValue(L"maxMemMb", JsonValue::CreateNumberValue(s.maxMemMb));
         o.SetNamedValue(L"minMemMb", JsonValue::CreateNumberValue(s.minMemMb));
+        o.SetNamedValue(L"fpsBoost", JsonValue::CreateBooleanValue(s.fpsBoost));
+        o.SetNamedValue(L"highPriority", JsonValue::CreateBooleanValue(s.highPriority));
+        o.SetNamedValue(L"extraJvmArgs", JsonValue::CreateStringValue(s.extraJvmArgs));
         std::ofstream f(StoreFile(), std::ios::binary | std::ios::trunc);
         f << to_string(o.Stringify());
     }

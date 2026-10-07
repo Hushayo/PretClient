@@ -129,7 +129,8 @@ namespace winrt::PretClient::Launcher
 
     Command BuildCommand(Downloader::PreparedGame const& game, hstring username, hstring uuid,
         hstring accessToken, hstring userType, hstring xuid,
-        int minMemMb, int maxMemMb, hstring javaExe)
+        int minMemMb, int maxMemMb, hstring javaExe,
+        bool fpsBoost, hstring extraJvmArgs)
     {
         Command cmd{};
         cmd.exe = javaExe;
@@ -283,6 +284,77 @@ namespace winrt::PretClient::Launcher
                 break;
             }
         }
+        // FPS boost: tuned G1GC flags (Aikar-style) + user JVM overrides.
+        // Skips any flag the version/loader JSON already set; user args are
+        // appended last so they win on duplicates (HotSpot takes the last).
+        if (fpsBoost)
+        {
+            auto hasPrefix = [&](std::wstring const& prefix) {
+                for (auto const& a : jvm)
+                {
+                    if (a.compare(0, prefix.size(), prefix) == 0)
+                        return true;
+                }
+                return false;
+            };
+            const wchar_t* boost[] = {
+                L"-XX:+UnlockExperimentalVMOptions",
+                L"-XX:+UseG1GC",
+                L"-XX:+ParallelRefProcEnabled",
+                L"-XX:MaxGCPauseMillis=200",
+                L"-XX:+DisableExplicitGC",
+                L"-XX:+AlwaysPreTouch",
+                L"-XX:G1NewSizePercent=30",
+                L"-XX:G1MaxNewSizePercent=40",
+                L"-XX:G1HeapRegionSize=8M",
+                L"-XX:G1ReservePercent=20",
+                L"-XX:G1HeapWastePercent=5",
+                L"-XX:G1MixedGCCountTarget=4",
+                L"-XX:InitiatingHeapOccupancyPercent=15",
+                L"-XX:G1MixedGCLiveThresholdPercent=90",
+                L"-XX:G1RSetUpdatingPauseTimePercent=5",
+                L"-XX:SurvivorRatio=32",
+                L"-XX:+PerfDisableSharedMem",
+                L"-XX:MaxTenuringThreshold=1",
+            };
+            for (auto flag : boost)
+            {
+                std::wstring f{ flag };
+                auto eq = f.find(L'=');
+                std::wstring key = (eq == std::wstring::npos) ? f : f.substr(0, eq + 1);
+                if (!hasPrefix(key))
+                    jvm.push_back(std::move(f));
+            }
+        }
+        if (!extraJvmArgs.empty())
+        {
+            // Quote-aware split: "C:\my dir\agent.jar" stays one arg.
+            std::wstring src{ extraJvmArgs };
+            std::wstring cur;
+            bool inQuotes = false;
+            auto flush = [&]() {
+                if (!cur.empty())
+                    jvm.push_back(cur);
+                cur.clear();
+            };
+            for (size_t i = 0; i < src.size(); ++i)
+            {
+                wchar_t c = src[i];
+                if (c == L'"')
+                {
+                    inQuotes = !inQuotes;
+                }
+                else if (!inQuotes && (c == L' ' || c == L'\t' || c == L'\r' || c == L'\n'))
+                {
+                    flush();
+                }
+                else
+                {
+                    cur += c;
+                }
+            }
+            flush();
+        }
         std::vector<std::wstring> tail;
         if (!hasCp)
         {
@@ -375,7 +447,8 @@ namespace winrt::PretClient::Launcher
         return cmd;
     }
 
-    bool Start(Command const& cmd, hstring const& instanceId, hstring& error)
+    bool Start(Command const& cmd, hstring const& instanceId, hstring& error,
+        bool highPriority, bool preferDedicatedGpu)
     {
         error = L"";
         try
@@ -406,6 +479,31 @@ namespace winrt::PretClient::Launcher
             std::filesystem::create_directories(std::filesystem::path{ std::wstring{ cmd.workDir } }, ec);
             auto logDir = std::filesystem::path{ std::wstring{ cmd.workDir } } / L"logs-pretclient";
             std::filesystem::create_directories(logDir, ec);
+            // Prefer the discrete GPU: Windows' per-app graphics preference
+            // (HKCU, no admin needed) + Optimus/PowerXpress hints the child
+            // inherits through the environment. All best-effort.
+            if (preferDedicatedGpu && !cmd.exe.empty())
+            {
+                try
+                {
+                    HKEY hk = nullptr;
+                    if (RegCreateKeyExW(HKEY_CURRENT_USER,
+                            L"SOFTWARE\\Microsoft\\DirectX\\UserGpuPreferences",
+                            0, nullptr, 0, KEY_SET_VALUE, nullptr, &hk, nullptr) == ERROR_SUCCESS)
+                    {
+                        const wchar_t* pref = L"GpuPreference=2;";
+                        RegSetValueExW(hk, std::wstring{ cmd.exe }.c_str(), 0, REG_SZ,
+                            reinterpret_cast<BYTE const*>(pref),
+                            static_cast<DWORD>((wcslen(pref) + 1) * sizeof(wchar_t)));
+                        RegCloseKey(hk);
+                    }
+                }
+                catch (...)
+                {
+                }
+                SetEnvironmentVariableW(L"__NVOPTIMUS_ENABLEMENT", L"0x00000001");
+                SetEnvironmentVariableW(L"__VK_LAYER_NV_optimus", L"NVIDIA_only");
+            }
             auto logFile = logDir / L"latest.txt";
             HANDLE logH = CreateFileW(logFile.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
                 nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
@@ -427,6 +525,25 @@ namespace winrt::PretClient::Launcher
                 return false;
             }
             CloseHandle(pi.hThread);
+            if (highPriority)
+            {
+                // Above-normal (never High/Realtime: those can starve audio
+                // and the system). Plus opt out of EcoQoS power throttling.
+                SetPriorityClass(pi.hProcess, ABOVE_NORMAL_PRIORITY_CLASS);
+#ifdef PROCESS_POWER_THROTTLING_EXECUTION_SPEED
+                try
+                {
+                    PROCESS_POWER_THROTTLING_STATE st{};
+                    st.Version = PROCESS_POWER_THROTTLING_CURRENT_VERSION;
+                    st.ControlMask = PROCESS_POWER_THROTTLING_EXECUTION_SPEED;
+                    st.StateMask = 0;
+                    SetProcessInformation(pi.hProcess, ProcessPowerThrottling, &st, sizeof(st));
+                }
+                catch (...)
+                {
+                }
+#endif
+            }
             {
                 std::lock_guard<std::mutex> lk(SessionsMutex());
                 Sessions()[key] = Session{ pi.hProcess, pi.dwProcessId };

@@ -18,10 +18,12 @@ namespace winrt::PretClient::Launcher
     hstring OfflineUuid(hstring username);
     Command BuildCommand(Downloader::PreparedGame const& game, hstring username, hstring uuid,
         hstring accessToken, hstring userType, hstring xuid,
-        int minMemMb, int maxMemMb, hstring javaExe);
+        int minMemMb, int maxMemMb, hstring javaExe,
+        bool fpsBoost = true, hstring extraJvmArgs = L"");
 
     // Process sessions, keyed by instance id.
-    bool Start(Command const& cmd, hstring const& instanceId, hstring& error);
+    bool Start(Command const& cmd, hstring const& instanceId, hstring& error,
+        bool highPriority = true, bool preferDedicatedGpu = true);
     void Stop(hstring const& instanceId);
     bool IsRunning(hstring const& instanceId);
     void* RawHandle(hstring const& instanceId);

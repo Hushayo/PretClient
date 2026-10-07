@@ -93,7 +93,8 @@ namespace winrt::PretClient
         winrt::fire_and_forget FinishLaunch(hstring id, hstring username, hstring javaPath,
             int minMem, int maxMem, Downloader::PreparedGame game, bool isModded,
             std::filesystem::path instanceMods, std::filesystem::path gameMods,
-            std::filesystem::path instancePacks, std::filesystem::path gamePacks);
+            std::filesystem::path instancePacks, std::filesystem::path gamePacks,
+            bool fpsBoost, hstring extraJvmArgs, bool highPriority);
         winrt::fire_and_forget ModsDialog(hstring id);
         winrt::fire_and_forget ResourcePacksDialog(hstring id);
         winrt::fire_and_forget AddDialog();

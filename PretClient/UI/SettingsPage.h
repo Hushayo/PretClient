@@ -28,6 +28,9 @@ namespace winrt::PretClient
         Microsoft::UI::Xaml::Controls::TextBox m_java{};
         Microsoft::UI::Xaml::Controls::TextBox m_cfKey{};
         Microsoft::UI::Xaml::Controls::ComboBox m_mem{};
+        Microsoft::UI::Xaml::Controls::CheckBox m_fpsBoost{};
+        Microsoft::UI::Xaml::Controls::CheckBox m_highPriority{};
+        Microsoft::UI::Xaml::Controls::TextBox m_extraJvm{};
         Microsoft::UI::Xaml::Controls::TextBlock m_status{};
         std::function<void()> m_onCheckUpdates{};
     };

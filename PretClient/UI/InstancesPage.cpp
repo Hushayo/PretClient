@@ -1954,6 +1954,9 @@ namespace winrt::PretClient
         hstring javaPath = settings.javaPath;
         int minMem = settings.minMemMb;
         int maxMem = settings.maxMemMb;
+        bool fpsBoost = settings.fpsBoost;
+        hstring extraJvmArgs = settings.extraJvmArgs;
+        bool highPriority = settings.highPriority;
 
         if (auto* card = FindCard(id))
         {
@@ -2030,7 +2033,7 @@ namespace winrt::PretClient
             javaPath,
             logCb, progCb,
             [this, id, username, javaPath, minMem, maxMem, fail, isModded, instanceMods, gameMods,
-                instancePacks, gamePacks](
+                instancePacks, gamePacks, fpsBoost, extraJvmArgs, highPriority](
                 bool ok, Downloader::PreparedGame game, hstring error) {
                 if (!ok)
                 {
@@ -2039,14 +2042,15 @@ namespace winrt::PretClient
                 }
                 FinishLaunch(id, username, javaPath, minMem, maxMem,
                     std::move(game), isModded, instanceMods, gameMods,
-                    instancePacks, gamePacks);
+                    instancePacks, gamePacks, fpsBoost, extraJvmArgs, highPriority);
             });
     }
 
     fire_and_forget InstancesPage::FinishLaunch(hstring id, hstring username, hstring javaPath,
         int minMem, int maxMem, Downloader::PreparedGame game, bool isModded,
         std::filesystem::path instanceMods, std::filesystem::path gameMods,
-        std::filesystem::path instancePacks, std::filesystem::path gamePacks)
+        std::filesystem::path instancePacks, std::filesystem::path gamePacks,
+        bool fpsBoost, hstring extraJvmArgs, bool highPriority)
     {
         auto failed = [this, id](hstring const& msg) {
             SetStatus(msg);
@@ -2101,9 +2105,9 @@ namespace winrt::PretClient
         }
         // Offline session: classic non-premium login.
         auto cmd = Launcher::BuildCommand(game, username, Launcher::OfflineUuid(username),
-            L"0", L"legacy", L"", minMem, maxMem, javaExe);
+            L"0", L"legacy", L"", minMem, maxMem, javaExe, fpsBoost, extraJvmArgs);
         hstring err;
-        if (Launcher::Start(cmd, id, err))
+        if (Launcher::Start(cmd, id, err, highPriority, fpsBoost))
             SetStatus(hstring{ L"Running (pid " } + to_hstring(static_cast<std::uint32_t>(Launcher::Pid(id))) +
                 L"). Game log below and in logs-pretclient/latest.txt");
         else

@@ -14,6 +14,9 @@ namespace winrt::PretClient
         hstring curseforgeKey{}; // per-user CurseForge API key (Mods page tab)
         int minMemMb = 512;
         int maxMemMb = 2048;
+        bool fpsBoost = true; // tuned G1GC JVM flags + discrete-GPU env hints
+        bool highPriority = true; // launch game above-normal priority
+        hstring extraJvmArgs{}; // user JVM args, appended after the boost flags
     };
 
     Settings LoadSettings();
