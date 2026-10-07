@@ -44,6 +44,24 @@ namespace winrt::PretClient
             s.javaPath = str(L"javaPath", L"");
             try
             {
+                if (o.HasKey(L"profiles") && o.GetNamedValue(L"profiles").ValueType() == JsonValueType::Array)
+                {
+                    for (auto const& pv : o.GetNamedArray(L"profiles"))
+                    {
+                        if (pv.ValueType() == JsonValueType::String)
+                        {
+                            hstring name = pv.GetString();
+                            if (!name.empty())
+                                s.profiles.push_back(name);
+                        }
+                    }
+                }
+            }
+            catch (...)
+            {
+            }
+            try
+            {
                 if (o.HasKey(L"maxMemMb"))
                     s.maxMemMb = static_cast<int>(o.GetNamedNumber(L"maxMemMb"));
                 if (o.HasKey(L"minMemMb"))
@@ -58,6 +76,17 @@ namespace winrt::PretClient
         }
         if (s.username.empty())
             s.username = L"Steve";
+        bool listed = false;
+        for (auto const& p : s.profiles)
+        {
+            if (p == s.username)
+            {
+                listed = true;
+                break;
+            }
+        }
+        if (!listed)
+            s.profiles.insert(s.profiles.begin(), s.username);
         if (s.maxMemMb < 512)
             s.maxMemMb = 2048;
         if (s.minMemMb < 256 || s.minMemMb > s.maxMemMb)
@@ -69,6 +98,10 @@ namespace winrt::PretClient
     {
         JsonObject o{};
         o.SetNamedValue(L"username", JsonValue::CreateStringValue(s.username));
+        JsonArray profs{};
+        for (auto const& p : s.profiles)
+            profs.Append(JsonValue::CreateStringValue(p));
+        o.SetNamedValue(L"profiles", profs);
         o.SetNamedValue(L"gameDir", JsonValue::CreateStringValue(s.gameDir));
         o.SetNamedValue(L"javaPath", JsonValue::CreateStringValue(s.javaPath));
         o.SetNamedValue(L"maxMemMb", JsonValue::CreateNumberValue(s.maxMemMb));

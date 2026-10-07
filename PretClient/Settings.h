@@ -1,10 +1,13 @@
 #pragma once
 
+#include <vector>
+
 namespace winrt::PretClient
 {
     struct Settings
     {
         hstring username{ L"Steve" };
+        std::vector<hstring> profiles{};
         hstring gameDir{}; // empty = roaming .minecraft
         hstring javaPath{};
         int minMemMb = 512;

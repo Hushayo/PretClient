@@ -17,7 +17,7 @@ namespace winrt::PretClient
         m_root.Padding(ThicknessHelper::FromUniformLength(24));
 
         TextBlock head{};
-        head.Text(L"Mods — Modrinth");
+        head.Text(L"Mods - Modrinth");
         head.Style(Application::Current().Resources().Lookup(box_value(L"TitleLargeTextBlockStyle")).as<Style>());
         m_root.Children().Append(head);
 
@@ -25,7 +25,7 @@ namespace winrt::PretClient
         row.Orientation(Orientation::Horizontal);
         row.Spacing(8);
 
-        m_query.PlaceholderText(L"Search mods… (e.g. sodium)");
+        m_query.PlaceholderText(L"Search mods... (e.g. sodium)");
         m_query.Width(280);
         row.Children().Append(m_query);
 
@@ -62,11 +62,22 @@ namespace winrt::PretClient
         m_status.TextWrapping(TextWrapping::Wrap);
         m_root.Children().Append(m_status);
 
-        ScrollViewer scroll{};
-        scroll.MaxHeight(520);
-        scroll.Content(m_results);
+        m_scroll.MaxHeight(560);
+        m_scroll.Content(m_results);
+        m_scroll.ViewChanged([this](IInspectable const&, ScrollViewerViewChangedEventArgs const&) {
+            try
+            {
+                if (m_loading || m_total <= 0 || m_offset >= m_total)
+                    return;
+                if (m_scroll.VerticalOffset() > m_scroll.ScrollableHeight() - 600.0)
+                    FetchPage();
+            }
+            catch (...)
+            {
+            }
+        });
         m_results.Spacing(8);
-        m_root.Children().Append(scroll);
+        m_root.Children().Append(m_scroll);
 
         RefreshInstances();
     }
@@ -88,20 +99,40 @@ namespace winrt::PretClient
 
     fire_and_forget ModsPage::OnSearch()
     {
-        SetStatus(L"Searching Modrinth…");
+        m_lastQuery = m_query.Text();
+        m_lastMc = m_mc.Text();
+        m_lastLoader = unbox_value_or<hstring>(m_loader.SelectedItem(), L"fabric");
+        m_offset = 0;
+        m_total = 0;
         m_results.Children().Clear();
-        hstring loader = unbox_value_or<hstring>(m_loader.SelectedItem(), L"fabric");
-        hstring query = m_query.Text();
-        hstring mc = m_mc.Text();
+        FetchPage();
+        co_return;
+    }
+
+    void ModsPage::FetchPage()
+    {
+        if (m_loading)
+            return;
+        m_loading = true;
+        SetStatus(L"Searching Modrinth...");
         Modrinth::SearchAsync(
-            query, mc, loader, [this](std::vector<Modrinth::ModHit> hits) {
-                if (hits.empty())
+            m_lastQuery, m_lastMc, m_lastLoader, m_offset,
+            [this](Modrinth::SearchResult result) {
+                m_loading = false;
+                if (result.hits.empty() && m_offset == 0)
                 {
                     SetStatus(L"No results (check the query, or offline?).");
                     return;
                 }
-                SetStatus(to_hstring(hits.size()) + L" result(s).");
-                for (auto const& hit : hits)
+                m_total = result.total;
+                m_offset += static_cast<int>(result.hits.size());
+                wchar_t buf[128]{};
+                if (m_total > 0)
+                    swprintf_s(buf, L"%d of %lld results (scroll for more).", m_offset, m_total);
+                else
+                    swprintf_s(buf, L"%d result(s).", m_offset);
+                SetStatus(buf);
+                for (auto const& hit : result.hits)
                 {
                     Border card{};
                     card.Background(Theme::CardBrush());
@@ -130,22 +161,29 @@ namespace winrt::PretClient
                     desc.TextWrapping(TextWrapping::Wrap);
                     info.Children().Append(desc);
                     TextBlock meta{};
-                    wchar_t buf[96]{};
-                    swprintf_s(buf, L"\u2B07 %lld \u00B7 %s", hit.downloads, std::wstring{ hit.slug }.c_str());
-                    meta.Text(buf);
+                    wchar_t mbuf[128]{};
+                    swprintf_s(mbuf, L"downloads %lld | %s", hit.downloads, std::wstring{ hit.slug }.c_str());
+                    meta.Text(mbuf);
                     meta.Style(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>());
                     meta.Opacity(0.6);
                     info.Children().Append(meta);
 
+                    StackPanel actions{};
+                    actions.Spacing(6);
+                    actions.VerticalAlignment(VerticalAlignment::Center);
                     Button install{};
                     install.Content(box_value(L"Install"));
-                    install.VerticalAlignment(VerticalAlignment::Center);
                     install.Click([this, hit](IInspectable const&, RoutedEventArgs const&) { OnInstall(hit); });
+                    actions.Children().Append(install);
+                    Button builds{};
+                    builds.Content(box_value(L"Builds"));
+                    builds.Click([this, hit](IInspectable const&, RoutedEventArgs const&) { BuildsDialog(hit); });
+                    actions.Children().Append(builds);
 
                     Grid::SetColumn(info, 0);
-                    Grid::SetColumn(install, 1);
+                    Grid::SetColumn(actions, 1);
                     grid.Children().Append(info);
-                    grid.Children().Append(install);
+                    grid.Children().Append(actions);
                     card.Child(grid);
                     m_results.Children().Append(card);
                 }
@@ -160,23 +198,22 @@ namespace winrt::PretClient
             co_return;
         }
         auto inst = m_targets[static_cast<size_t>(m_target.SelectedIndex())];
-        hstring loader = inst.loader == L"vanilla"
-            ? unbox_value_or<hstring>(m_loader.SelectedItem(), L"fabric")
-            : inst.loader;
+        hstring loader = inst.loader == L"vanilla" ? m_lastLoader : inst.loader;
         if (loader == L"all")
             loader = L"";
-        SetStatus(hstring{ L"Resolving " } + hit.title + L"…");
+        hstring mc = inst.mcVersion;
+        SetStatus(hstring{ L"Resolving " } + hit.title + L"...");
         Modrinth::PickFileAsync(
-            hit.projectId.empty() ? hit.slug : hit.projectId, inst.mcVersion, loader,
-            [this](Modrinth::ModFile file) {
+            hit.projectId.empty() ? hit.slug : hit.projectId, mc, loader,
+            [this, hit](Modrinth::ModFile file) {
                 if (file.url.empty())
                 {
-                    SetStatus(L"No matching file (version/loader?).");
+                    SetStatus(L"No matching file (version/loader?). Try Builds for a specific one.");
                     return;
                 }
                 auto settings = LoadSettings();
                 auto mods = std::filesystem::path{ std::wstring{ EffectiveGameDir(settings) } } / L"mods";
-                SetStatus(hstring{ L"Downloading " } + file.filename + L"…");
+                SetStatus(hstring{ L"Downloading " } + file.filename + L"...");
                 InstallOneFile(file, mods.wstring());
             });
     }
@@ -193,5 +230,136 @@ namespace winrt::PretClient
             status = L"Install failed.";
         }
         SetStatus(status);
+    }
+
+    fire_and_forget ModsPage::BuildsDialog(Modrinth::ModHit hit)
+    {
+        hstring mc = m_mc.Text();
+        hstring loader = unbox_value_or<hstring>(m_loader.SelectedItem(), L"fabric");
+        if (loader == L"all")
+            loader = L"";
+
+        StackPanel panel{};
+        panel.Spacing(8);
+        TextBlock loading{};
+        loading.Text(L"Loading builds...");
+        loading.Opacity(0.7);
+        panel.Children().Append(loading);
+        StackPanel list{};
+        list.Spacing(6);
+        panel.Children().Append(list);
+
+        ContentDialog dialog{};
+        dialog.Title(box_value(hit.title + L" - builds"));
+        dialog.Content(panel);
+        dialog.CloseButtonText(L"Close");
+        dialog.XamlRoot(m_root.XamlRoot());
+
+        std::wstring modsDir;
+        if (!m_targets.empty() && m_target.SelectedIndex() >= 0)
+        {
+            auto inst = m_targets[static_cast<size_t>(m_target.SelectedIndex())];
+            auto settings = LoadSettings();
+            modsDir = (std::filesystem::path{ std::wstring{ EffectiveGameDir(settings) } } / L"mods").wstring();
+            if (loader.empty() && inst.loader != L"vanilla")
+                loader = inst.loader;
+            if (mc.empty())
+                mc = inst.mcVersion;
+        }
+
+        Modrinth::GetVersionsAsync(
+            hit.projectId.empty() ? hit.slug : hit.projectId, mc, loader,
+            [this, list, loading, modsDir, dialog](std::vector<Modrinth::ModVersion> versions) mutable {
+                loading.Visibility(Visibility::Collapsed);
+                if (versions.empty())
+                {
+                    TextBlock t{};
+                    t.Text(L"No builds match (try clearing the MC filter).");
+                    t.Opacity(0.7);
+                    list.Children().Append(t);
+                    return;
+                }
+                int shown = 0;
+                for (auto const& v : versions)
+                {
+                    if (++shown > 30)
+                        break;
+                    Border card{};
+                    card.Background(Theme::CardBrush());
+                    card.BorderBrush(Theme::CardStroke());
+                    card.BorderThickness(ThicknessHelper::FromUniformLength(1));
+                    card.CornerRadius(CornerRadiusHelper::FromUniformRadius(6));
+                    card.Padding(ThicknessHelper::FromUniformLength(10));
+
+                    Grid grid{};
+                    grid.ColumnSpacing(10);
+                    grid.ColumnDefinitions().Append(ColumnDefinition{});
+                    grid.ColumnDefinitions().Append(ColumnDefinition{});
+                    grid.ColumnDefinitions().GetAt(0).Width(GridLengthHelper::FromValueAndType(1.0, GridUnitType::Star));
+                    grid.ColumnDefinitions().GetAt(1).Width(GridLengthHelper::Auto());
+
+                    StackPanel info{};
+                    TextBlock name{};
+                    name.Text(v.versionNumber);
+                    info.Children().Append(name);
+                    TextBlock meta{};
+                    std::wstring games;
+                    // versions arrays can be huge; show a few.
+                    // (game list arrives in ModVersion? show id instead.)
+                    meta.Text(hstring{ L"id " } + v.id);
+                    meta.Opacity(0.6);
+                    meta.Style(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>());
+                    info.Children().Append(meta);
+
+                    Button install{};
+                    install.Content(box_value(L"Install this"));
+                    install.VerticalAlignment(VerticalAlignment::Center);
+                    install.Click([this, v, modsDir, dialog](IInspectable const&, RoutedEventArgs const&) mutable {
+                        Modrinth::ModFile file{};
+                        for (auto const& f : v.files)
+                        {
+                            if (f.primary && !f.url.empty())
+                            {
+                                file = f;
+                                break;
+                            }
+                        }
+                        if (file.url.empty())
+                        {
+                            for (auto const& f : v.files)
+                            {
+                                if (!f.url.empty())
+                                {
+                                    file = f;
+                                    break;
+                                }
+                            }
+                        }
+                        if (file.url.empty() || modsDir.empty())
+                        {
+                            SetStatus(L"No file in that build (or no target instance).");
+                            return;
+                        }
+                        SetStatus(hstring{ L"Downloading " } + file.filename + L"...");
+                        InstallOneFile(file, modsDir);
+                        try
+                        {
+                            dialog.Hide();
+                        }
+                        catch (...)
+                        {
+                        }
+                    });
+
+                    Grid::SetColumn(info, 0);
+                    Grid::SetColumn(install, 1);
+                    grid.Children().Append(info);
+                    grid.Children().Append(install);
+                    card.Child(grid);
+                    list.Children().Append(card);
+                }
+            });
+
+        co_await dialog.ShowAsync();
     }
 }

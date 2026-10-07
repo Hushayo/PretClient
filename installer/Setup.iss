@@ -13,6 +13,7 @@ DefaultDirName={localappdata}\Programs\PretClient
 DefaultGroupName=PretClient
 OutputDir=Output
 OutputBaseFilename=PretClient-Setup
+SetupIconFile=icon.ico
 Compression=lzma2
 SolidCompression=yes
 PrivilegesRequired=lowest

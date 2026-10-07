@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 120 120" role="img" aria-label="PretClient icon">
+  <title>PretClient</title>
+  <rect width="120" height="120" rx="28" fill="#4338CA"/>
+  <path d="M44 90 V32 H66 A19 19 0 0 1 66 70 H44" fill="none" stroke="#FFFFFF" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="82" cy="88" r="8" fill="#FBBF24"/>
+</svg>

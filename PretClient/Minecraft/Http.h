@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <fstream>
 #include <vector>
 #include <winrt/Windows.Storage.Streams.h>
@@ -31,8 +32,6 @@ namespace winrt::PretClient::Http
         co_return co_await resp.Content().ReadAsStringAsync();
     }
 
-    // IBuffer is a WinRT type, so it can cross coroutine boundaries.
-    // Convert with BufferToVector at the call site.
     inline Windows::Foundation::IAsyncOperation<Windows::Storage::Streams::IBuffer> GetBufferAsync(
         hstring url, hstring userAgent)
     {
@@ -60,7 +59,6 @@ namespace winrt::PretClient::Http
         outHex.clear();
         BCRYPT_ALG_HANDLE alg = nullptr;
         BCRYPT_HASH_HANDLE hash = nullptr;
-        std::vector<std::uint8_t> obj;
         std::vector<std::uint8_t> digest(20);
         std::ifstream f(path, std::ios::binary);
         if (!f.good())
@@ -75,37 +73,104 @@ namespace winrt::PretClient::Http
             BCryptCloseAlgorithmProvider(alg, 0);
             return false;
         }
-        obj.resize(objLen);
+        std::vector<std::uint8_t> obj(objLen);
         if (BCryptCreateHash(alg, &hash, obj.data(), objLen, nullptr, 0, 0) != 0)
         {
             BCryptCloseAlgorithmProvider(alg, 0);
             return false;
         }
         char chunk[65536];
-        while (f.good())
+        bool readOk = true;
+        for (;;)
         {
             f.read(chunk, sizeof(chunk));
             auto n = static_cast<ULONG>(f.gcount());
             if (n > 0 && BCryptHashData(hash, reinterpret_cast<PUCHAR>(chunk), n, 0) != 0)
-                break;
-            if (n == 0)
             {
-                if (BCryptFinishHash(hash, digest.data(), static_cast<ULONG>(digest.size()), 0) == 0)
-                {
-                    wchar_t hex[41]{};
-                    for (size_t i = 0; i < digest.size(); ++i)
-                        swprintf_s(hex + i * 2, 3, L"%02x", digest[i]);
-                    outHex = hex;
-                    ok = true;
-                }
+                readOk = false;
                 break;
             }
+            if (n < sizeof(chunk))
+                break; // EOF (or empty file): finalize below.
+        }
+        if (readOk && BCryptFinishHash(hash, digest.data(), static_cast<ULONG>(digest.size()), 0) == 0)
+        {
+            wchar_t hex[41]{};
+            for (size_t i = 0; i < digest.size(); ++i)
+                swprintf_s(hex + i * 2, 3, L"%02x", digest[i]);
+            outHex = hex;
+            ok = true;
         }
         if (hash)
             BCryptDestroyHash(hash);
         if (alg)
             BCryptCloseAlgorithmProvider(alg, 0);
         return ok;
+    }
+
+    using ProgFn = std::function<void(unsigned long long done, unsigned long long total, double bytesPerSec)>;
+
+    // Stream a URL straight to disk (no full-file RAM buffering) with
+    // progress + speed callbacks. Returns "" on success, error text otherwise.
+    inline Windows::Foundation::IAsyncOperation<hstring> DownloadToFileAsync(
+        hstring url, std::filesystem::path const& dest, hstring userAgent, ProgFn prog)
+    {
+        try
+        {
+            auto resp = co_await GetAsync(url, userAgent);
+            resp.EnsureSuccessStatusCode();
+            unsigned long long total = 0;
+            try
+            {
+                if (auto len = resp.Content().Headers().ContentLength())
+                    total = len.Value();
+            }
+            catch (...)
+            {
+            }
+            auto stream = co_await resp.Content().ReadAsInputStreamAsync();
+            std::error_code ec;
+            std::filesystem::create_directories(dest.parent_path(), ec);
+            std::ofstream f(dest, std::ios::binary | std::ios::trunc);
+            if (!f.good())
+                co_return L"Cannot write file.";
+            Windows::Storage::Streams::DataReader reader(stream);
+            const std::uint32_t CH = 65536;
+            std::vector<std::uint8_t> scratch(CH);
+            unsigned long long done = 0;
+            auto t0 = std::chrono::steady_clock::now();
+            for (;;)
+            {
+                std::uint32_t got = co_await reader.LoadAsync(CH);
+                if (got == 0)
+                    break;
+                reader.ReadBytes({ scratch.data(), got });
+                f.write(reinterpret_cast<char const*>(scratch.data()), got);
+                if (!f)
+                    co_return L"Write failed.";
+                done += got;
+                if (prog)
+                {
+                    double secs = std::chrono::duration<double>(
+                        std::chrono::steady_clock::now() - t0)
+                                          .count();
+                    prog(done, total, secs > 0.05 ? done / secs : 0.0);
+                }
+            }
+            f.close();
+            try
+            {
+                reader.DetachStream();
+            }
+            catch (...)
+            {
+            }
+            co_return hstring{};
+        }
+        catch (...)
+        {
+            co_return L"Download failed.";
+        }
     }
 
     // Extract a zip (natives jar) with the inbox tar.exe, skipping META-INF/.

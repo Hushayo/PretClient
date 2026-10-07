@@ -163,9 +163,9 @@ namespace winrt::PretClient::Modrinth
         }
     } // namespace
 
-    fire_and_forget SearchAsync(hstring query, hstring mcVersion, hstring loader, SearchFn done)
+    fire_and_forget SearchAsync(hstring query, hstring mcVersion, hstring loader, int offset, SearchFn done)
     {
-        std::vector<ModHit> out;
+        SearchResult out{};
         try
         {
             std::wstring facets = L"[[\"project_type:mod\"]";
@@ -175,9 +175,18 @@ namespace winrt::PretClient::Modrinth
                 facets += L",[\"categories:" + std::wstring{ loader } + L"\"]";
             facets += L"]";
             hstring url = hstring{ kApi } + L"/search?query=" + Http::Escape(query) +
-                L"&facets=" + Http::Escape(hstring{ facets }) + L"&limit=20&index=relevance";
+                L"&facets=" + Http::Escape(hstring{ facets }) + L"&limit=20&offset=" +
+                to_hstring(offset) + L"&index=relevance";
             auto text = co_await Http::GetStringAsync(url, kUA);
             auto root = JsonObject::Parse(text);
+            try
+            {
+                if (root.HasKey(L"total_hits"))
+                    out.total = static_cast<long long>(root.GetNamedNumber(L"total_hits"));
+            }
+            catch (...)
+            {
+            }
             if (root.HasKey(L"hits"))
             {
                 for (auto const& hv : root.GetNamedArray(L"hits"))
@@ -200,7 +209,7 @@ namespace winrt::PretClient::Modrinth
                     {
                     }
                     if (!hit.projectId.empty())
-                        out.push_back(std::move(hit));
+                        out.hits.push_back(std::move(hit));
                 }
             }
         }

@@ -54,9 +54,10 @@ namespace winrt::PretClient::Downloader
             }
         }
 
-        // Download unless present+valid. Returns empty on success, error text otherwise.
+        // Download (streamed, with progress) unless present+valid.
+        // Returns empty on success, error text otherwise.
         IAsyncOperation<hstring> FetchFile(hstring url, std::filesystem::path const& dest,
-            long long size, hstring sha1, hstring what, LogFn log)
+            long long size, hstring sha1, hstring what, LogFn log, FileProgFn prog)
         {
             if (FileOk(dest, size, sha1))
             {
@@ -66,19 +67,19 @@ namespace winrt::PretClient::Downloader
             if (url.empty())
                 co_return hstring{ L"Missing URL for " } + what;
             log(L"  + " + what);
-            std::vector<std::uint8_t> bytes;
-            try
+            auto fileProg = [prog, what](unsigned long long done, unsigned long long total, double bps) {
+                if (prog)
+                    prog(what, done, total, bps);
+            };
+            if (auto err = co_await Http::DownloadToFileAsync(url, dest, kUA, fileProg); !err.empty())
+                co_return err;
+            if (size > 0)
             {
-                bytes = Http::BufferToVector(co_await Http::GetBufferAsync(url, kUA));
+                std::error_code ec;
+                auto have = static_cast<long long>(std::filesystem::file_size(dest, ec));
+                if (!ec && have != size)
+                    co_return hstring{ L"Size mismatch: " } + what;
             }
-            catch (...)
-            {
-                co_return hstring{ L"Download failed: " } + what;
-            }
-            if (size > 0 && static_cast<long long>(bytes.size()) != size)
-                co_return hstring{ L"Size mismatch: " } + what;
-            if (!Http::WriteFile(dest, bytes))
-                co_return hstring{ L"Cannot write: " } + what;
             if (!sha1.empty() && !FileOk(dest, size, sha1))
                 co_return hstring{ L"Checksum mismatch: " } + what;
             co_return hstring{};
@@ -98,7 +99,7 @@ namespace winrt::PretClient::Downloader
 
     fire_and_forget PrepareAsync(
         hstring mcVersion, hstring loader, hstring loaderVersion,
-        std::wstring const& gameDir, LogFn log, DoneFn done)
+        std::wstring const& gameDir, LogFn log, FileProgFn prog, DoneFn done)
     {
         auto fail = [&](hstring const& msg) { done(false, PreparedGame{}, msg); };
         PreparedGame game{};
@@ -241,7 +242,7 @@ namespace winrt::PretClient::Downloader
             game.clientJar = hstring{ (versionsDir / (std::wstring{ vanillaId } + L".jar")).wstring() };
             log(L"Client jar...");
             if (auto err = co_await FetchFile(clientUrl, std::filesystem::path{ std::wstring{ game.clientJar } },
-                    clientSize, clientSha1, L"client.jar", log);
+                    clientSize, clientSha1, L"client.jar", log, prog);
                 !err.empty())
             {
                 fail(err);
@@ -278,7 +279,7 @@ namespace winrt::PretClient::Downloader
                                 size = static_cast<long long>(art.GetNamedNumber(L"size"));
                             auto dest = libsDir / std::filesystem::path{ std::wstring{ rel } };
                             if (auto err = co_await FetchFile(url, dest, size, sha1,
-                                    hstring{ L"lib " } + std::wstring{ name }, log);
+                                    hstring{ L"lib " } + std::wstring{ name }, log, prog);
                                 !err.empty())
                             {
                                 fail(err);
@@ -319,7 +320,7 @@ namespace winrt::PretClient::Downloader
                                 if (art.HasKey(L"size"))
                                     size = static_cast<long long>(art.GetNamedNumber(L"size"));
                                 auto dest = libsDir / std::filesystem::path{ std::wstring{ rel.empty() ? L"natives-legacy.jar" : rel } };
-                                if (auto err = co_await FetchFile(url, dest, size, sha1, L"legacy natives", log);
+                                if (auto err = co_await FetchFile(url, dest, size, sha1, L"legacy natives", log, prog);
                                     !err.empty())
                                 {
                                     fail(err);
@@ -365,7 +366,7 @@ namespace winrt::PretClient::Downloader
                     }
                     auto dest = libsDir / std::filesystem::path{ std::wstring{ rel } };
                     if (auto err = co_await FetchFile(url, dest, size, sha1,
-                            hstring{ L"fabric " } + std::wstring{ name }, log);
+                            hstring{ L"fabric " } + std::wstring{ name }, log, prog);
                         !err.empty())
                     {
                         fail(err);
@@ -427,7 +428,7 @@ namespace winrt::PretClient::Downloader
             game.assetIndexId = assetId;
             auto indexPath = gamePath / L"assets" / L"indexes" / (std::wstring{ assetId } + L".json");
             log(L"Asset index...");
-            if (auto err = co_await FetchFile(assetUrl, indexPath, assetSize, assetSha1, L"assets index", log);
+            if (auto err = co_await FetchFile(assetUrl, indexPath, assetSize, assetSha1, L"assets index", log, prog);
                 !err.empty())
             {
                 fail(err);
@@ -507,7 +508,7 @@ namespace winrt::PretClient::Downloader
                     if (!id.empty() && !url.empty())
                     {
                         auto dest = versionsDir / std::filesystem::path{ std::wstring{ id } };
-                        if (auto err = co_await FetchFile(url, dest, size, sha1, L"logging config", log);
+                        if (auto err = co_await FetchFile(url, dest, size, sha1, L"logging config", log, prog);
                             !err.empty())
                         {
                             fail(err);

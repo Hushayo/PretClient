@@ -65,29 +65,34 @@ namespace winrt::PretClient
     std::vector<Instance> LoadInstances()
     {
         std::vector<Instance> out;
+        std::filesystem::path store = StoreFile();
+        std::error_code ec0;
+        bool existed = std::filesystem::exists(store, ec0);
         try
         {
-            std::ifstream f(StoreFile());
-            if (!f.good())
-                return out;
-            std::string text((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
-            if (text.empty())
-                return out;
-            auto arr = JsonArray::Parse(to_hstring(text));
-            for (auto const& v : arr)
+            std::ifstream f(store);
+            if (f.good())
             {
-                if (v.ValueType() == JsonValueType::Object)
+                std::string text((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+                if (!text.empty())
                 {
-                    auto in = FromJson(v.GetObject());
-                    if (!in.id.empty())
-                        out.push_back(std::move(in));
+                    auto arr = JsonArray::Parse(to_hstring(text));
+                    for (auto const& v : arr)
+                    {
+                        if (v.ValueType() == JsonValueType::Object)
+                        {
+                            auto in = FromJson(v.GetObject());
+                            if (!in.id.empty())
+                                out.push_back(std::move(in));
+                        }
+                    }
                 }
             }
         }
         catch (...)
         {
         }
-        if (out.empty())
+        if (out.empty() && !existed)
         {
             Instance def{};
             def.id = L"default";

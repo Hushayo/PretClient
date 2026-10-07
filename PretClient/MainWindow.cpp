@@ -14,7 +14,7 @@ namespace winrt::PretClient
 {
     MainWindow::MainWindow()
     {
-        Title(L"PretClient — Minecraft Launcher");
+        Title(L"PretClient");
         SystemBackdrop(MicaBackdrop{});
         try
         {
@@ -63,7 +63,7 @@ namespace winrt::PretClient
         nav.MenuItems().Append(m_navMods);
         nav.MenuItems().Append(m_navSettings);
 
-        nav.PaneTitle(hstring{ L"PretClient " } + Update::CurrentVersionTag());
+        nav.PaneTitle(L"PretClient");
 
         nav.Content(m_host);
         nav.SelectionChanged([this](NavigationView const&, NavigationViewSelectionChangedEventArgs const& args) {
@@ -111,7 +111,7 @@ namespace winrt::PretClient
         if (!latest.empty() && Update::IsNewerTag(current, latest))
         {
             m_updateUrl = Update::DownloadUrlFor(release);
-            m_updateText.Text(L"Update available: " + current + L" → " + latest);
+            m_updateText.Text(L"Update available: " + current + L" -> " + latest);
             m_banner.Visibility(Visibility::Visible);
         }
     }

@@ -27,9 +27,11 @@ namespace winrt::PretClient::Downloader
         int javaMajor = 8;
     };
 
+    // Per-file progress: label, bytes done/total (total 0 when unknown), B/s.
+    using FileProgFn = std::function<void(hstring file, unsigned long long done, unsigned long long total, double bps)>;
     using DoneFn = std::function<void(bool ok, PreparedGame game, hstring error)>;
 
     winrt::fire_and_forget PrepareAsync(
         hstring mcVersion, hstring loader, hstring loaderVersion,
-        std::wstring const& gameDir, LogFn log, DoneFn done);
+        std::wstring const& gameDir, LogFn log, FileProgFn prog, DoneFn done);
 }

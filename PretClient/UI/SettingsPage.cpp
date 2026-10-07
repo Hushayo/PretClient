@@ -3,6 +3,7 @@
 #include "Theme.h"
 #include "../Paths.h"
 #include "../Settings.h"
+#include "../Update/Updater.h"
 
 using namespace winrt;
 using namespace Microsoft::UI::Xaml;
@@ -68,6 +69,12 @@ namespace winrt::PretClient
 
         m_status.Opacity(0.7);
         m_root.Children().Append(m_status);
+
+        TextBlock ver{};
+        ver.Opacity(0.5);
+        ver.Style(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>());
+        ver.Text(hstring{ L"PretClient " } + Update::CurrentVersionTag());
+        m_root.Children().Append(ver);
 
         Refresh();
     }
