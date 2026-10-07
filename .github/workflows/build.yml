@@ -1,54 +1,79 @@
-name: Build WinUI 3 (C++)
+name: Auto Tag Release
 
 on:
   push:
     branches: [main]
-    tags:
-      - 'v*'
-      - 'release-*'
-  pull_request:
-  workflow_dispatch:
-    inputs:
-      build_installer:
-        description: 'Build the Inno Setup installer'
-        required: false
-        default: false
-        type: boolean
+    paths:
+      - '**.cpp'
+      - '**.h'
+      - '**.hpp'
+      - '**.rc'
+      - '*.sln'
+      - 'VERSION'
+
+permissions:
+  contents: write
 
 jobs:
-  build:
-    runs-on: windows-2022
+  tag:
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Setup MSBuild
-        uses: microsoft/setup-msbuild@v2
-
-      - name: Build x64 Release (unpackaged exe)
-        run: msbuild PretClient.sln /restore /p:Configuration=Release /p:Platform=x64 /verbosity:minimal
-
-      - name: List outputs
-        if: always()
-        run: |
-          if (Test-Path x64/Release) { Get-ChildItem -Recurse x64/Release | Select-Object FullName -First 50 } else { echo "no x64/Release outputs" }
-        shell: pwsh
-
-      - name: Install Inno Setup
-        if: ${{ success() && (github.ref_type == 'tag' || (github.event_name == 'workflow_dispatch' && inputs.build_installer)) }}
-        run: choco install innosetup --no-progress -y
-        shell: pwsh
-
-      - name: Build custom setup
-        if: ${{ success() && (github.ref_type == 'tag' || (github.event_name == 'workflow_dispatch' && inputs.build_installer)) }}
-        run: '& "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /DMyAppVersion="0.0.1-dev+${{ github.run_number }}" installer\Setup.iss'
-        shell: pwsh
-
-      - name: Upload setup
-        if: ${{ success() && (github.ref_type == 'tag' || (github.event_name == 'workflow_dispatch' && inputs.build_installer)) }}
-        uses: actions/upload-artifact@v4
         with:
-          name: PretClient-Setup
-          path: installer/Output/PretClient-Setup.exe
-          if-no-files-found: error
+          fetch-depth: 0
+
+      - name: Read current version
+        id: version
+        shell: bash
+        run: |
+          VERSION=$(cat VERSION)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Check if tag exists
+        id: tagcheck
+        shell: bash
+        run: |
+          if git rev-parse "v${{ steps.version.outputs.version }}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Bump patch version
+        if: steps.tagcheck.outputs.exists == 'true'
+        id: bump
+        shell: bash
+        run: |
+          VERSION=$(cat VERSION)
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
+          NEW_PATCH=$((PATCH + 1))
+          NEW_VERSION="${MAJOR}.${MINOR}.${NEW_PATCH}"
+          echo "$NEW_VERSION" > VERSION
+          echo "new_version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Configure git
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Commit version bump
+        if: steps.tagcheck.outputs.exists == 'true'
+        shell: bash
+        run: |
+          git add VERSION
+          git commit -m "Bump version to ${{ steps.bump.outputs.new_version }}" || echo "No version bump needed"
+          git push
+
+      - name: Determine tag version
+        id: tag_version
+        shell: bash
+        run: |
+          if [ "${{ steps.tagcheck.outputs.exists }}" = "true" ]; then
+            VERSION=$(cat VERSION)
+            echo "tag=v${VERSION}" >> "$GITHUB_OUTPUT"
+          else
+            VERSION=$(cat VERSION)
+            echo "tag=v${VERSION}" >> "$GITHUB_OUTPUT"
