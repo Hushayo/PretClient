@@ -1097,16 +1097,29 @@ namespace winrt::PretClient
             if (v.major < game.javaMajor)
                 javaExe = L"";
         }
+        int pickedChecked = 0;
+        int pickedBest = 0;
         if (javaExe.empty())
-            javaExe = Java::Pick(game.javaMajor);
+        {
+            auto picked = Java::PickDetailed(game.javaMajor);
+            javaExe = picked.path;
+            pickedChecked = picked.checked;
+            pickedBest = picked.bestMajor;
+        }
 
         co_await ForegroundAwait{ m_dispatcher };
         m_preparing.erase(std::wstring{ id });
         m_downloads.erase(std::wstring{ id });
         if (javaExe.empty())
         {
-            failed(hstring{ L"No Java " } + to_hstring(game.javaMajor) +
-                L"+ found. Install one or set a path in Settings.");
+            wchar_t buf[320]{};
+            if (pickedBest > 0)
+                swprintf_s(buf, L"No Java %d+ found (checked %d install(s), newest is Java %d). Install a 64-bit Java %d+ or set the java.exe path in Settings.",
+                    game.javaMajor, pickedChecked, pickedBest, game.javaMajor);
+            else
+                swprintf_s(buf, L"No Java %d+ found (checked %d install(s)). Install a 64-bit Java %d+ or set the java.exe path in Settings.",
+                    game.javaMajor, pickedChecked, game.javaMajor);
+            failed(buf);
             co_return;
         }
         auto uuid = Launcher::OfflineUuid(username);

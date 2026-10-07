@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "Java.h"
 #include "../Paths.h"
+#include <future>
 
 using namespace winrt;
 
@@ -268,25 +269,41 @@ namespace winrt::PretClient::Java
         {
         }
         std::vector<Install> out;
+        // Probe candidates concurrently: each Verify spawns a process with
+        // a long timeout, and sequential probing could stall for minutes
+        // when several installs are present (or one hangs).
+        std::vector<std::future<Install>> pending;
         for (auto const& p : paths)
+            pending.push_back(std::async(std::launch::async, [p] { return Verify(p); }));
+        for (auto& f : pending)
         {
-            auto in = Verify(p);
-            if (in.major > 0)
-                out.push_back(std::move(in));
+            try
+            {
+                auto in = f.get();
+                if (in.major > 0)
+                    out.push_back(std::move(in));
+            }
+            catch (...)
+            {
+            }
             if (out.size() >= 12)
                 break;
         }
         return out;
     }
 
-    hstring Pick(int requiredMajor)
+    PickResult PickDetailed(int requiredMajor)
     {
+        PickResult r{};
         try
         {
             auto all = FindAll();
+            r.checked = static_cast<int>(all.size());
             Install const* best = nullptr;
             for (auto const& in : all)
             {
+                if (in.major > r.bestMajor)
+                    r.bestMajor = in.major;
                 if (in.major < requiredMajor)
                     continue;
                 if (!in.is64Bit && requiredMajor >= 17)
@@ -295,11 +312,16 @@ namespace winrt::PretClient::Java
                     best = &in;
             }
             if (best)
-                return best->path;
+                r.path = best->path;
         }
         catch (...)
         {
         }
-        return hstring{};
+        return r;
+    }
+
+    hstring Pick(int requiredMajor)
+    {
+        return PickDetailed(requiredMajor).path;
     }
 }

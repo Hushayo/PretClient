@@ -6,6 +6,7 @@
 #include <chrono>
 #include <filesystem>
 #include <shellapi.h>
+#include <winrt/Microsoft.UI.Xaml.Media.Animation.h>
 
 using namespace winrt;
 using namespace Microsoft::UI::Xaml;
