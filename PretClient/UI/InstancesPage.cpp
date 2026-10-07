@@ -485,7 +485,6 @@ namespace winrt::PretClient
             Grid::SetColumn(buttons, 1);
             head.Children().Append(buttons);
 
-            shell.Children().Append(body);
             card.Child(shell);
             m_cards.Children().Append(card);
 
