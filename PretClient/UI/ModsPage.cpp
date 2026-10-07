@@ -40,7 +40,7 @@ namespace winrt::PretClient
         m_loader.Items().Append(box_value(L"forge"));
         m_loader.Items().Append(box_value(L"quilt"));
         m_loader.Items().Append(box_value(L"neoforge"));
-        m_loader.SelectedIndex(1);
+        m_loader.SelectedIndex(0);
         row.Children().Append(m_loader);
 
         // MC version is automatic from the target instance (read-only): the
@@ -166,6 +166,11 @@ namespace winrt::PretClient
             if (inst.loader == L"vanilla")
             {
                 // No loader on the instance: let the user browse any loader.
+                // Reset a previously locked selection (e.g. fabric) back to
+                // "all" so the result line can't promise a loader the
+                // target doesn't have.
+                if (!m_loader.IsEnabled())
+                    m_loader.SelectedIndex(0);
                 m_loader.IsEnabled(true);
                 if (m_loader.SelectedIndex() < 0)
                     m_loader.SelectedIndex(0);
@@ -263,7 +268,7 @@ namespace winrt::PretClient
         else
         {
             m_lastMc = m_mc.Text();
-            m_lastLoader = unbox_value_or<hstring>(m_loader.SelectedItem(), L"fabric");
+            m_lastLoader = unbox_value_or<hstring>(m_loader.SelectedItem(), L"all");
         }
         m_offset = 0;
         m_total = 0;
@@ -381,6 +386,11 @@ namespace winrt::PretClient
             co_return;
         }
         auto inst = m_targets[static_cast<size_t>(m_target.SelectedIndex())];
+        if (inst.loader == L"vanilla")
+        {
+            SetStatus(L"Target is vanilla (no mod loader) — mods won't load. Create a Fabric instance instead.");
+            co_return;
+        }
         hstring loader = inst.loader == L"vanilla" ? m_lastLoader : inst.loader;
         if (loader == L"all")
             loader = L"";
@@ -449,17 +459,19 @@ namespace winrt::PretClient
         dialog.XamlRoot(m_root.XamlRoot());
 
         std::wstring modsDir;
+        bool targetVanilla = false;
         if (!m_targets.empty() && m_target.SelectedIndex() >= 0 &&
             static_cast<size_t>(m_target.SelectedIndex()) < m_targets.size())
         {
             auto inst = m_targets[static_cast<size_t>(m_target.SelectedIndex())];
+            targetVanilla = (inst.loader == L"vanilla");
             auto settings = LoadSettings();
             modsDir = InstanceModsDir(settings, inst.id).wstring();
         }
 
         Modrinth::GetVersionsAsync(
             hit.projectId.empty() ? hit.slug : hit.projectId, mc, loader,
-            [this, list, loading, modsDir, dialog](std::vector<Modrinth::ModVersion> versions) mutable {
+            [this, list, loading, modsDir, dialog, targetVanilla](std::vector<Modrinth::ModVersion> versions) mutable {
                 loading.Visibility(Visibility::Collapsed);
                 if (versions.empty())
                 {
@@ -504,7 +516,12 @@ namespace winrt::PretClient
                     Button install{};
                     install.Content(box_value(L"Install this"));
                     install.VerticalAlignment(VerticalAlignment::Center);
-                    install.Click([this, v, modsDir, dialog](IInspectable const&, RoutedEventArgs const&) mutable {
+                    install.Click([this, v, modsDir, dialog, targetVanilla](IInspectable const&, RoutedEventArgs const&) mutable {
+                        if (targetVanilla)
+                        {
+                            SetStatus(L"Target is vanilla (no mod loader) — mods won't load. Create a Fabric instance instead.");
+                            return;
+                        }
                         Modrinth::ModFile file{};
                         for (auto const& f : v.files)
                         {
