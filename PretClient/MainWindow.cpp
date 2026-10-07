@@ -3,16 +3,16 @@
 #include "UI/Theme.h"
 #include "Minecraft/Http.h"
 #include "Update/Updater.h"
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
+#include <memory>
 #include <shellapi.h>
-#include <winrt/Microsoft.UI.Xaml.Media.Animation.h>
 
 using namespace winrt;
 using namespace Microsoft::UI::Xaml;
 using namespace Microsoft::UI::Xaml::Controls;
 using namespace Microsoft::UI::Xaml::Media;
-using namespace Microsoft::UI::Xaml::Media::Animation;
 using namespace Windows::Data::Json;
 using namespace Windows::Foundation;
 
@@ -20,21 +20,35 @@ namespace winrt::PretClient
 {
     namespace
     {
-        // 150ms fade-in for tab content swaps. Opacity is a compositor
-        // animation: it runs on the GPU, not the UI thread.
+        // 160ms fade-in for tab content swaps, driven by a dispatcher timer
+        // (the Storyboard animation headers are broken in this SDK: the
+        // generated Animation.h does not compile here). Opacity-only, so it
+        // stays cheap. weak_ref breaks the timer/lambda cycle.
         void FadeIn(UIElement const& el)
         {
             try
             {
-                Storyboard sb{};
-                DoubleAnimation anim{};
-                anim.From(box_value(0.0).as<Windows::Foundation::IReference<double>>());
-                anim.To(box_value(1.0).as<Windows::Foundation::IReference<double>>());
-                anim.Duration(DurationHelper::FromTimeSpan(std::chrono::milliseconds{ 150 }));
-                Storyboard::SetTarget(anim, el);
-                Storyboard::SetTargetProperty(anim, L"Opacity");
-                sb.Children().Append(anim);
-                sb.Begin();
+                el.Opacity(0.0);
+                auto timer = Microsoft::UI::Dispatching::DispatcherQueue::GetForCurrentThread().CreateTimer();
+                timer.Interval(std::chrono::milliseconds{ 16 });
+                winrt::weak_ref<Microsoft::UI::Dispatching::DispatcherQueueTimer> weak{ timer };
+                auto step = std::make_shared<int>(0);
+                timer.Tick([el, weak, step](auto&&, auto&&) {
+                    try
+                    {
+                        auto t = weak.get();
+                        if (!t)
+                            return;
+                        *step += 1;
+                        el.Opacity((std::min)(1.0, *step / 10.0));
+                        if (*step >= 10)
+                            t.Stop();
+                    }
+                    catch (...)
+                    {
+                    }
+                });
+                timer.Start();
             }
             catch (...)
             {
