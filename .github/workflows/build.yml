@@ -33,7 +33,7 @@ jobs:
 
       - name: Build custom setup
         if: success()
-        run: & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /DMyAppVersion="0.0.1-dev+${{ github.run_number }}" installer\Setup.iss
+        run: '& "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /DMyAppVersion="0.0.1-dev+${{ github.run_number }}" installer\Setup.iss'
         shell: pwsh
 
       - name: Upload setup
