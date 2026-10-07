@@ -1,6 +1,5 @@
 #include "pch.h"
 #include "InstancesPage.h"
-#include <winrt/Microsoft.UI.Dispatching.h>
 #include "Theme.h"
 #include "../Minecraft/Downloader.h"
 #include "../Minecraft/Fabric.h"
@@ -13,6 +12,7 @@
 #include "../Minecraft/Launcher.h"
 #include "../Minecraft/Versions.h"
 #include "../Settings.h"
+#include <coroutine>
 
 using namespace winrt;
 using namespace Microsoft::UI::Xaml;
@@ -58,6 +58,27 @@ namespace winrt::PretClient
             swprintf_s(buf, L"%.1f%%", v);
             return hstring{ buf };
         }
+
+        // Minimal foreground awaitable (C++/WinRT's resume_foreground is not
+        // available in this SDK): hops the coroutine onto the UI thread via
+        // the dispatcher queue the project already uses for its timer.
+        struct ForegroundAwait
+        {
+            Microsoft::UI::Dispatching::DispatcherQueue queue{ nullptr };
+            bool await_ready() const noexcept
+            {
+                return false;
+            }
+            void await_suspend(std::coroutine_handle<> h) const
+            {
+                queue.TryEnqueue(
+                    Microsoft::UI::Dispatching::DispatcherQueuePriority::Normal,
+                    [h]() mutable { h.resume(); });
+            }
+            void await_resume() const noexcept
+            {
+            }
+        };
     } // namespace
 
     InstancesPage::InstancesPage()
@@ -873,7 +894,7 @@ namespace winrt::PretClient
                 rows.push_back(std::move(r));
             }
 
-            co_await winrt::resume_foreground(m_dispatcher);
+            co_await ForegroundAwait{ m_dispatcher };
             for (auto const& r : rows)
             {
                 auto* card = FindCard(r.id);
