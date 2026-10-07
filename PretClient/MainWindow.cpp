@@ -79,7 +79,7 @@ namespace winrt::PretClient
         m_updateBar.IsOpen(false);
         m_updateBar.IsClosable(true);
         m_updateBar.Severity(InfoBarSeverity::Informational);
-        m_updateBar.Title(box_value(L"Update available"));
+        m_updateBar.Title(L"Update available");
         m_updateInstallButton.Content(box_value(L"Install now"));
         m_updateInstallButton.Click([this](IInspectable const&, RoutedEventArgs const&) { InstallUpdateLatest(); });
         m_updateBar.ActionButton(m_updateInstallButton);
@@ -223,7 +223,7 @@ namespace winrt::PretClient
             if (!m_updateBar)
                 return;
             hstring current = Update::CurrentVersionTag();
-            m_updateBar.Message(box_value(hstring{ L"PretClient " } + current + L" → " + latest +
+            m_updateBar.Message(hstring{ L"PretClient " } + current + L" → " + latest +
                 L" is ready. Install now, or open Settings for details."));
             m_updateBar.IsOpen(true);
         }
