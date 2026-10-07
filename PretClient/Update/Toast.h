@@ -1,17 +1,23 @@
 #pragma once
 
-// Update toasts: the self-update banner replacement. Unpackaged apps can
-// toast through an explicit AppUserModelID as long as the Start-menu
-// shortcut carries the same ID (stamped here at runtime, best-effort).
-// All calls are safe from any thread state and never throw: when toasts are
-// unavailable (no shortcut, no shell) they silently do nothing and the
-// Settings status line remains the fallback surface.
+#include <functional>
+
+// Update toasts via the Windows App SDK AppNotifications API: the supported
+// path for unpackaged apps (in-process button activation, no COM server, no
+// protocol registration). All calls never throw; when notifications are
+// unavailable the Settings status line remains the fallback surface.
 namespace winrt::PretClient::Update::Toast
 {
-    // "Update vX -> vY is ready" with Install-now (pretclient://update) and
-    // Release-notes (https release page) actions.
+    using ActionFn = std::function<void(hstring const& action)>;
+
+    // Call once on the UI thread (MainWindow ctor). Registers the notification
+    // activator and routes button clicks to onAction ("action=install" or
+    // "action=notes;<url>").
+    void EnsureRegistered(ActionFn onAction);
+
+    // "Update vX -> vY is ready" with Install-now and Release-notes buttons.
     void ShowAvailable(hstring const& current, hstring const& latest);
-    // Swap to the downloading layout (progress bar bound to NotificationData).
+    // Swap to the downloading layout (progress bar bound to progress data).
     void ShowDownloading(hstring const& latest);
     // Progress tick: status text + done/total bytes (total 0 = unknown).
     void ShowProgress(hstring const& status, unsigned long long done, unsigned long long total);

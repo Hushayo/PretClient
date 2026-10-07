@@ -1,23 +1,23 @@
 #include "pch.h"
 #include "Toast.h"
 #include <algorithm>
-#include <chrono>
-#include <shlobj.h>
-#include <propkey.h>
+#include <winrt/Microsoft.Windows.AppNotifications.h>
 #include <winrt/Windows.Data.Xml.Dom.h>
-#include <winrt/Windows.UI.Notifications.h>
 
 using namespace winrt;
 using namespace Windows::Data::Xml::Dom;
-using namespace Windows::UI::Notifications;
+using namespace Microsoft::Windows::AppNotifications;
 
 namespace winrt::PretClient::Update::Toast
 {
     namespace
     {
-        constexpr wchar_t kAumid[] = L"Hushayo.PretClient";
         constexpr wchar_t kTag[] = L"pretclient-update";
         constexpr wchar_t kGroup[] = L"updates";
+
+        Microsoft::UI::Dispatching::DispatcherQueue g_dispatcher{ nullptr };
+        ActionFn g_onAction{};
+        bool g_registered = false;
 
         std::wstring Escape(std::wstring s)
         {
@@ -36,122 +36,22 @@ namespace winrt::PretClient::Update::Toast
             return s;
         }
 
-        // Explicit identity for an unpackaged process. Once per process.
-        void EnsureIdentity()
-        {
-            static bool done = false;
-            if (done)
-                return;
-            done = true;
-            try
-            {
-                SetCurrentProcessExplicitAppUserModelId(kAumid);
-            }
-            catch (...)
-            {
-            }
-        }
-
-        // The Start-menu shortcut must carry the same AppUserModelID or the
-        // shell drops our toasts. Stamp it at runtime (best-effort): this
-        // also repairs installs from before the protocol/identity work.
-        // Verified state is cached; a missing shortcut is retried cheaply
-        // (one exists-check) since a later install may create it.
-        void EnsureShortcutAppId()
-        {
-            static bool stamped = false;
-            if (stamped)
-                return;
-            try
-            {
-                PWSTR raw = nullptr;
-                if (FAILED(SHGetKnownFolderPath(FOLDERID_Programs, 0, nullptr, &raw)))
-                    return;
-                std::filesystem::path lnk{ raw };
-                CoTaskMemFree(raw);
-                lnk /= L"PretClient";
-                lnk /= L"PretClient.lnk";
-                std::error_code ec;
-                if (!std::filesystem::exists(lnk, ec))
-                    return;
-                com_ptr<IShellLinkW> link;
-                if (FAILED(CoCreateInstance(CLSID_ShellLink, nullptr, CLSCTX_INPROC_SERVER,
-                        __uuidof(IShellLinkW), link.put_void())))
-                    return;
-                com_ptr<IPersistFile> persist = link.as<IPersistFile>();
-                if (FAILED(persist->Load(lnk.c_str(), STGM_READWRITE)))
-                    return;
-                com_ptr<IPropertyStore> store = link.as<IPropertyStore>();
-                PROPVARIANT current{};
-                bool already = false;
-                if (SUCCEEDED(store->GetValue(PKEY_AppUserModel_ID, &current)))
-                {
-                    if (current.vt == VT_LPWSTR && current.pwszVal &&
-                        wcscmp(current.pwszVal, kAumid) == 0)
-                        already = true;
-                    PropVariantClear(&current);
-                }
-                if (already)
-                {
-                    stamped = true;
-                    return;
-                }
-                PROPVARIANT pv{};
-                pv.vt = VT_LPWSTR;
-                size_t len = wcslen(kAumid) + 1;
-                pv.pwszVal = static_cast<wchar_t*>(CoTaskMemAlloc(len * sizeof(wchar_t)));
-                if (!pv.pwszVal)
-                    return;
-                wcscpy_s(pv.pwszVal, len, kAumid);
-                HRESULT hr = store->SetValue(PKEY_AppUserModel_ID, pv);
-                PropVariantClear(&pv);
-                if (FAILED(hr))
-                    return;
-                store->Commit();
-                persist->Save(nullptr, TRUE);
-                stamped = true;
-            }
-            catch (...)
-            {
-            }
-        }
-
-        ToastNotifier Notifier()
-        {
-            EnsureIdentity();
-            EnsureShortcutAppId();
-            return ToastNotificationManager::CreateToastNotifierWithId(kAumid);
-        }
-
-        XmlDocument DocFor(hstring const& xml)
-        {
-            XmlDocument doc{};
-            doc.LoadXml(xml);
-            return doc;
-        }
-
-        hstring ReleaseTagUrl(hstring const& latest)
-        {
-            return hstring{ L"https://github.com/Hushayo/PretClient/releases/tag/" } + latest;
-        }
-
         void Show(XmlDocument const& doc)
         {
             try
             {
-                auto notifier = Notifier();
+                auto manager = AppNotificationManager::Default();
                 try
                 {
-                    ToastNotificationManager::History().Remove(kTag, kGroup);
+                    manager.RemoveByTagAsync(kTag);
                 }
                 catch (...)
                 {
                 }
-                ToastNotification toast{ doc };
+                AppNotification toast{ doc };
                 toast.Tag(kTag);
                 toast.Group(kGroup);
-                toast.ExpirationTime(winrt::clock::now() + std::chrono::hours(72));
-                notifier.Show(toast);
+                manager.Show(toast);
             }
             catch (...)
             {
@@ -161,38 +61,27 @@ namespace winrt::PretClient::Update::Toast
         void ShowSimple(hstring const& title, hstring const& body)
         {
             std::wstring xml =
-                L"<toast launch=\"pretclient://open\" activationType=\"protocol\">"
+                L"<toast>"
                 L"<visual><binding template=\"ToastGeneric\">"
                 L"<text>" + Escape(std::wstring{ title }) + L"</text>"
                 L"<text>" + Escape(std::wstring{ body }) + L"</text>"
                 L"</binding></visual>"
                 L"</toast>";
-            Show(DocFor(xml));
+            XmlDocument doc{};
+            doc.LoadXml(xml);
+            Show(doc);
         }
 
-        void ShowWithProgress(hstring const& title, hstring const& status,
-            double value01, hstring const& valueText)
+        void PushProgress(hstring const& status, double value01, hstring const& valueText)
         {
-            wchar_t vbuf[32]{};
-            swprintf_s(vbuf, L"%.4f", (std::max)(0.0, (std::min)(1.0, value01)));
-            std::wstring xml =
-                L"<toast launch=\"pretclient://open\" activationType=\"protocol\">"
-                L"<visual><binding template=\"ToastGeneric\">"
-                L"<text>" + Escape(std::wstring{ title }) + L"</text>"
-                L"<text>" + Escape(std::wstring{ status }) + L"</text>"
-                L"<progress title=\"\" value=\"" + std::wstring{ vbuf } +
-                L"\" valueStringOverride=\"" + Escape(std::wstring{ valueText }) +
-                L"\" status=\"" + Escape(std::wstring{ status }) + L"\"/>"
-                L"</binding></visual>"
-                L"</toast>";
-            Show(DocFor(xml));
             try
             {
-                Windows::Foundation::Collections::StringMap data{};
-                data.Insert(L"progressValue", hstring{ vbuf });
-                data.Insert(L"progressValueString", valueText);
-                data.Insert(L"progressStatus", status);
-                Notifier().Update(NotificationData{ data, 1 }, kTag, kGroup);
+                AppNotificationProgressData data{};
+                data.Title(L"");
+                data.Value((std::max)(0.0, (std::min)(1.0, value01)));
+                data.ValueStringOverride(valueText);
+                data.Status(status);
+                AppNotificationManager::Default().UpdateAsync(kTag, kGroup, data);
             }
             catch (...)
             {
@@ -212,25 +101,86 @@ namespace winrt::PretClient::Update::Toast
                 swprintf_s(buf, L"%llu B", b);
             return hstring{ buf };
         }
+
+        hstring ReleaseTagUrl(hstring const& latest)
+        {
+            return hstring{ L"https://github.com/Hushayo/PretClient/releases/tag/" } + latest;
+        }
     } // namespace
+
+    void EnsureRegistered(ActionFn onAction)
+    {
+        if (g_registered)
+            return;
+        g_registered = true;
+        g_onAction = std::move(onAction);
+        try
+        {
+            g_dispatcher = Microsoft::UI::Dispatching::DispatcherQueue::GetForCurrentThread();
+        }
+        catch (...)
+        {
+        }
+        try
+        {
+            auto manager = AppNotificationManager::Default();
+            manager.NotificationInvoked([onActionCopy = g_onAction](
+                    AppNotificationManager const&, AppNotificationInvokedEventArgs const& args) {
+                try
+                {
+                    hstring argument;
+                    try
+                    {
+                        argument = args.Argument();
+                    }
+                    catch (...)
+                    {
+                    }
+                    auto run = [onActionCopy, argument]() {
+                        try
+                        {
+                            if (onActionCopy && !argument.empty())
+                                onActionCopy(argument);
+                        }
+                        catch (...)
+                        {
+                        }
+                    };
+                    if (g_dispatcher)
+                        g_dispatcher.TryEnqueue(run);
+                    else
+                        run();
+                }
+                catch (...)
+                {
+                }
+            });
+            manager.Register();
+        }
+        catch (...)
+        {
+        }
+    }
 
     void ShowAvailable(hstring const& current, hstring const& latest)
     {
         try
         {
+            hstring notesArg = hstring{ L"action=notes;" } + ReleaseTagUrl(latest);
             std::wstring xml =
-                L"<toast launch=\"pretclient://open\" activationType=\"protocol\">"
+                L"<toast>"
                 L"<visual><binding template=\"ToastGeneric\">"
                 L"<text>PretClient update available</text>"
                 L"<text>" + Escape(std::wstring{ current } + L" \u2192 " + std::wstring{ latest }) + L"</text>"
                 L"</binding></visual>"
                 L"<actions>"
-                L"<action content=\"Install now\" arguments=\"pretclient://update\" activationType=\"protocol\"/>"
-                L"<action content=\"Release notes\" arguments=\"" + Escape(std::wstring{ ReleaseTagUrl(latest) }) +
-                L"\" activationType=\"protocol\"/>"
+                L"<action content=\"Install now\" arguments=\"action=install\"/>"
+                L"<action content=\"Release notes\" arguments=\"" + Escape(std::wstring{ notesArg }) + L"\"/>"
                 L"</actions>"
                 L"</toast>";
-            Show(DocFor(xml));
+            XmlDocument doc{};
+            doc.LoadXml(xml);
+            Show(doc);
         }
         catch (...)
         {
@@ -239,29 +189,33 @@ namespace winrt::PretClient::Update::Toast
 
     void ShowDownloading(hstring const& latest)
     {
-        ShowWithProgress(hstring{ L"Downloading PretClient " } + latest, L"Starting\u2026", 0.0, L"\u2026");
-    }
-
-    void ShowProgress(hstring const& status, unsigned long long done, unsigned long long total)
-    {
         try
         {
-            double v = total > 0 ? static_cast<double>(done) / static_cast<double>(total) : 0.0;
-            hstring text = total > 0
-                ? hstring{ ByteText(done) } + L" / " + ByteText(total)
-                : ByteText(done);
-            Windows::Foundation::Collections::StringMap data{};
-            wchar_t vbuf[32]{};
-            swprintf_s(vbuf, L"%.4f", (std::max)(0.0, (std::min)(1.0, v)));
-            data.Insert(L"progressValue", hstring{ vbuf });
-            data.Insert(L"progressValueString", text);
-            data.Insert(L"progressStatus", status);
-            static unsigned int seq = 1;
-            Notifier().Update(NotificationData{ data, ++seq }, kTag, kGroup);
+            std::wstring xml =
+                L"<toast>"
+                L"<visual><binding template=\"ToastGeneric\">"
+                L"<text>" + Escape(std::wstring{ hstring{ L"Downloading PretClient " } + latest }) + L"</text>"
+                L"<text>" + Escape(std::wstring{ L"Starting\u2026" }) + L"</text>"
+                L"<progress title=\"\" value=\"{progressValue}\" valueStringOverride=\"{progressValueString}\" status=\"{progressStatus}\"/>"
+                L"</binding></visual>"
+                L"</toast>";
+            XmlDocument doc{};
+            doc.LoadXml(xml);
+            Show(doc);
+            PushProgress(L"Starting\u2026", 0.0, L"\u2026");
         }
         catch (...)
         {
         }
+    }
+
+    void ShowProgress(hstring const& status, unsigned long long done, unsigned long long total)
+    {
+        double v = total > 0 ? static_cast<double>(done) / static_cast<double>(total) : 0.0;
+        hstring text = total > 0
+            ? hstring{ ByteText(done) } + L" / " + ByteText(total)
+            : ByteText(done);
+        PushProgress(status, v, text);
     }
 
     void ShowDone(hstring const& msg)
@@ -278,8 +232,7 @@ namespace winrt::PretClient::Update::Toast
     {
         try
         {
-            EnsureIdentity();
-            ToastNotificationManager::History().Remove(kTag, kGroup);
+            AppNotificationManager::Default().RemoveByTagAsync(kTag);
         }
         catch (...)
         {

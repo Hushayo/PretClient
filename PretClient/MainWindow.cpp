@@ -3,6 +3,7 @@
 #include "Settings.h"
 #include "UI/Theme.h"
 #include "Minecraft/Http.h"
+#include "Update/Toast.h"
 #include "Update/Updater.h"
 #include <algorithm>
 #include <chrono>
@@ -67,10 +68,8 @@ namespace winrt::PretClient
         Grid root{};
         root.RowDefinitions().Append(RowDefinition{});
         root.RowDefinitions().Append(RowDefinition{});
-        root.RowDefinitions().Append(RowDefinition{});
         root.RowDefinitions().GetAt(0).Height(GridLengthHelper::Auto());
-        root.RowDefinitions().GetAt(1).Height(GridLengthHelper::Auto());
-        root.RowDefinitions().GetAt(2).Height(GridLengthHelper::FromValueAndType(1.0, GridUnitType::Star));
+        root.RowDefinitions().GetAt(1).Height(GridLengthHelper::FromValueAndType(1.0, GridUnitType::Star));
 
         // Top-right round profile avatar (global, visible on every page).
         m_topBar.Padding(ThicknessHelper::FromLengths(0, 8, 16, 0));
@@ -94,27 +93,6 @@ namespace winrt::PretClient
         m_topBar.Children().Append(m_profileButton);
         Grid::SetRow(m_topBar, 0);
         root.Children().Append(m_topBar);
-
-        m_banner.Orientation(Orientation::Horizontal);
-        m_banner.Spacing(12);
-        m_banner.Padding(ThicknessHelper::FromLengths(24, 12, 24, 12));
-        m_banner.Visibility(Visibility::Collapsed);
-        m_banner.Background(SolidColorBrush{ Windows::UI::ColorHelper::FromArgb(38, 0x44, 0xBD, 0x32) });
-        m_updateText.VerticalAlignment(VerticalAlignment::Center);
-        m_updateText.TextWrapping(TextWrapping::Wrap);
-        m_updateProg.Minimum(0);
-        m_updateProg.Maximum(100);
-        m_updateProg.Width(220);
-        m_updateProg.VerticalAlignment(VerticalAlignment::Center);
-        m_updateProg.Visibility(Visibility::Collapsed);
-        Button updateButton{};
-        updateButton.Content(box_value(L"Download and install"));
-        updateButton.Click([this, updateButton](IInspectable const&, RoutedEventArgs const&) { InstallUpdate(updateButton); });
-        m_banner.Children().Append(m_updateText);
-        m_banner.Children().Append(m_updateProg);
-        m_banner.Children().Append(updateButton);
-        Grid::SetRow(m_banner, 1);
-        root.Children().Append(m_banner);
 
         NavigationView nav{};
         nav.IsBackButtonVisible(NavigationViewBackButtonVisible::Collapsed);
@@ -176,7 +154,7 @@ namespace winrt::PretClient
                 FadeContent(m_instances.Root());
             }
         });
-        Grid::SetRow(nav, 2);
+        Grid::SetRow(nav, 1);
         root.Children().Append(nav);
 
         // Keep the avatar initial/tooltip in sync (profile switches call
@@ -188,6 +166,19 @@ namespace winrt::PretClient
         nav.SelectedItem(m_navInstances);
 
         m_settings.OnCheckUpdates([this] { CheckForUpdates(); });
+        // Toast button clicks land here in-process (no protocol/COM setup):
+        // Install runs the self-update flow, Release-notes opens the page.
+        Update::Toast::EnsureRegistered([this](hstring const& action) {
+            std::wstring a{ action };
+            if (a == L"action=install")
+            {
+                InstallUpdateLatest();
+                return;
+            }
+            std::wstring prefix = L"action=notes;";
+            if (a.rfind(prefix, 0) == 0)
+                Update::OpenUrl(hstring{ a.substr(prefix.size()) });
+        });
         CheckForUpdates();
     }
 
@@ -275,13 +266,8 @@ namespace winrt::PretClient
         hstring current = Update::CurrentVersionTag();
         if (!latest.empty() && Update::IsNewerTag(current, latest))
         {
-            auto asset = Update::FindSetupAsset(release);
-            if (!asset.url.empty())
-                m_updateAsset = asset;
-            else
-                m_updateUrl = Update::DownloadUrlFor(release);
-            m_updateText.Text(L"Update available: " + current + L" -> " + latest);
-            m_banner.Visibility(Visibility::Visible);
+            m_settings.SetStatus(hstring{ L"Update " } + latest + L" available — see notification.");
+            Update::Toast::ShowAvailable(current, latest);
         }
         else
         {
@@ -289,46 +275,87 @@ namespace winrt::PretClient
         }
     }
 
-    fire_and_forget MainWindow::InstallUpdate(Button button)
+    // Toast-driven one-click self-update (toast Install button lands here via
+    // the EnsureRegistered action handler). Re-resolves the release so the toast never
+    // carries stale URLs; progress + errors go to the toast, Settings status
+    // mirrors the headline states.
+    fire_and_forget MainWindow::InstallUpdateLatest()
     {
-        if (m_updateAsset.url.empty())
-        {
-            Update::OpenUrl(m_updateUrl); // no setup asset: release-page fallback
+        if (m_updating)
             co_return;
-        }
-        if (!Update::IsInstallerUrl(m_updateAsset.url))
+        m_updating = true;
+        struct ResetGuard
         {
-            Update::OpenUrl(m_updateAsset.url);
-            co_return;
-        }
-        auto failUpdate = [this, button](hstring const& msg) {
-            m_updateText.Text(msg);
-            m_updateProg.Visibility(Visibility::Collapsed);
-            button.IsEnabled(true);
+            MainWindow* self;
+            bool disarm = false;
+            ~ResetGuard()
+            {
+                if (!disarm && self)
+                    self->m_updating = false;
+            }
         };
-        button.IsEnabled(false);
-        m_updateProg.Value(0);
-        m_updateProg.IsIndeterminate(true);
-        m_updateProg.Visibility(Visibility::Visible);
-        m_updateText.Text(L"Pending...");
+        ResetGuard guard{ this };
+
+        auto failUpdate = [this](hstring const& msg) {
+            m_settings.SetStatus(msg);
+            Update::Toast::ShowError(msg);
+        };
+
+        m_settings.SetStatus(L"Checking for updates...");
+        JsonObject release{ nullptr };
+        try
+        {
+            release = co_await Update::GetLatestReleaseAsync();
+        }
+        catch (...)
+        {
+        }
+        hstring latest;
+        hstring current = Update::CurrentVersionTag();
+        try
+        {
+            if (release)
+                latest = release.GetNamedString(L"tag_name", L"");
+        }
+        catch (...)
+        {
+        }
+        if (!release || latest.empty() || !Update::IsNewerTag(current, latest))
+        {
+            m_settings.SetStatus(L"Already up to date.");
+            Update::Toast::ShowDone(L"Already up to date.");
+            co_return;
+        }
+        auto asset = Update::FindSetupAsset(release);
+        if (asset.url.empty() || !Update::IsInstallerUrl(asset.url))
+        {
+            // No direct setup asset: hand the user the release page instead.
+            Update::OpenUrl(Update::DownloadUrlFor(release));
+            guard.disarm = true;
+            m_updating = false;
+            m_settings.SetStatus(L"Opened release page.");
+            co_return;
+        }
+
+        Update::Toast::ShowDownloading(latest);
+        m_settings.SetStatus(hstring{ L"Downloading update " } + latest + L"...");
         auto dest = std::filesystem::temp_directory_path() / L"PretClient-Setup.exe";
-        hstring err = co_await Http::DownloadToFileAsync(m_updateAsset.url, dest, L"PretClient/1.0",
-            [this](unsigned long long done, unsigned long long total, double) {
+        hstring err = co_await Http::DownloadToFileAsync(asset.url, dest, L"PretClient/1.0",
+            [this, latest](unsigned long long done, unsigned long long total, double) {
                 wchar_t buf[192]{};
                 if (total > 0)
                 {
                     double pct = 100.0 * static_cast<double>(done) / static_cast<double>(total);
                     swprintf_s(buf, L"Downloading update... %.0f%% (%s / %s)", pct,
                         MbText(done).c_str(), MbText(total).c_str());
-                    m_updateText.Text(buf);
-                    m_updateProg.IsIndeterminate(false);
-                    m_updateProg.Value(pct);
+                    m_settings.SetStatus(buf);
                 }
                 else
                 {
                     swprintf_s(buf, L"Downloading update... %s", MbText(done).c_str());
-                    m_updateText.Text(buf);
+                    m_settings.SetStatus(buf);
                 }
+                Update::Toast::ShowProgress(buf, done, total);
             });
         if (!err.empty())
         {
@@ -336,11 +363,11 @@ namespace winrt::PretClient
             co_return;
         }
         // Size check against the published asset size.
-        if (m_updateAsset.size > 0)
+        if (asset.size > 0)
         {
             std::error_code ec;
             auto have = std::filesystem::file_size(dest, ec);
-            if (ec || have != m_updateAsset.size)
+            if (ec || have != asset.size)
             {
                 std::filesystem::remove(dest, ec);
                 failUpdate(L"Update failed: size mismatch, please retry.");
@@ -348,12 +375,13 @@ namespace winrt::PretClient
             }
         }
         // Hash check against the release's published sha256 digest.
-        if (!m_updateAsset.sha256.empty())
+        if (!asset.sha256.empty())
         {
-            m_updateText.Text(L"Checking hash...");
+            m_settings.SetStatus(L"Checking hash...");
+            Update::Toast::ShowProgress(L"Checking hash...", 0, 0);
             std::wstring hex;
             if (!Http::Sha256OfFile(dest, hex) ||
-                _wcsicmp(hex.c_str(), std::wstring{ m_updateAsset.sha256 }.c_str()) != 0)
+                _wcsicmp(hex.c_str(), std::wstring{ asset.sha256 }.c_str()) != 0)
             {
                 std::error_code ec;
                 std::filesystem::remove(dest, ec);
@@ -364,8 +392,8 @@ namespace winrt::PretClient
         // Per-user install (no UAC): run it silent, let it replace us, exit
         // now so no files are locked. The installer's postinstall entry
         // relaunches the app when done.
-        m_updateProg.Visibility(Visibility::Collapsed);
-        m_updateText.Text(L"Installing update... the app will close and reopen.");
+        m_settings.SetStatus(L"Installing update... the app will close and reopen.");
+        Update::Toast::ShowDone(L"Installing... the app will close and reopen.");
         auto rc = ShellExecuteW(nullptr, L"open", dest.c_str(),
             L"/SILENT /CLOSEAPPLICATIONS", nullptr, SW_SHOWNORMAL);
         if (reinterpret_cast<INT_PTR>(rc) <= 32)
@@ -373,6 +401,7 @@ namespace winrt::PretClient
             failUpdate(L"Could not start installer.");
             co_return;
         }
+        guard.disarm = true; // committed: the process exits below
         Application::Current().Exit();
     }
 }
