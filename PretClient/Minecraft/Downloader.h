@@ -33,5 +33,6 @@ namespace winrt::PretClient::Downloader
 
     winrt::fire_and_forget PrepareAsync(
         hstring mcVersion, hstring loader, hstring loaderVersion,
-        std::wstring const& gameDir, LogFn log, FileProgFn prog, DoneFn done);
+        std::wstring const& gameDir, std::wstring const& modsDir,
+        LogFn log, FileProgFn prog, DoneFn done);
 }

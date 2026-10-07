@@ -5,6 +5,8 @@
 #include "Modrinth.h"
 #include "Rules.h"
 #include "Versions.h"
+#include <algorithm>
+#include <coroutine>
 #include <fstream>
 
 using namespace winrt;
@@ -55,18 +57,22 @@ namespace winrt::PretClient::Downloader
         }
 
         // Download (streamed, with progress) unless present+valid.
-        // Returns empty on success, error text otherwise.
+        // Returns empty on success, error text otherwise. quiet skips the
+        // per-file log lines (batched fetches report progress in aggregate).
         IAsyncOperation<hstring> FetchFile(hstring url, std::filesystem::path const& dest,
-            long long size, hstring sha1, hstring what, LogFn log, FileProgFn prog)
+            long long size, hstring sha1, hstring what, LogFn log, FileProgFn prog,
+            bool quiet = false)
         {
             if (FileOk(dest, size, sha1))
             {
-                log(L"  ok " + what);
+                if (!quiet)
+                    log(L"  ok " + what);
                 co_return hstring{};
             }
             if (url.empty())
                 co_return hstring{ L"Missing URL for " } + what;
-            log(L"  + " + what);
+            if (!quiet)
+                log(L"  + " + what);
             auto fileProg = [prog, what](unsigned long long done, unsigned long long total, double bps) {
                 if (prog)
                     prog(what, done, total, bps);
@@ -95,11 +101,162 @@ namespace winrt::PretClient::Downloader
                 return false;
             return true;
         }
+
+        // ---- bounded-concurrency fetch batch ---------------------------------
+        // One sequential pass over ~3000 asset objects (or ~200 libraries) is
+        // what made first runs crawl: every file paid a full round trip. A
+        // batch runs several FetchFile coroutines at once; they only suspend
+        // on network I/O and all resume on the calling apartment context.
+
+        struct WaitGroup
+        {
+            size_t pending = 0;
+            std::coroutine_handle<> waiter{};
+
+            void Add()
+            {
+                ++pending;
+            }
+            void Done()
+            {
+                if (pending == 0)
+                    return;
+                if (--pending == 0 && waiter)
+                {
+                    auto h = waiter;
+                    waiter = {};
+                    // Resumes PrepareAsync inline; it must not touch *this
+                    // afterwards (the batch lives in PrepareAsync's frame).
+                    h.resume();
+                }
+            }
+        };
+
+        struct WaitAwaiter
+        {
+            WaitGroup* wg;
+            bool await_ready() const noexcept
+            {
+                return wg->pending == 0;
+            }
+            void await_suspend(std::coroutine_handle<> h) noexcept
+            {
+                wg->waiter = h;
+            }
+            void await_resume() const noexcept
+            {
+            }
+        };
+
+        struct FetchJob
+        {
+            hstring url{};
+            std::filesystem::path dest{};
+            long long size = 0;
+            hstring sha1{};
+            hstring what{};
+            unsigned long long lastDone = 0;
+        };
+
+        struct FetchBatch
+        {
+            hstring label{ L"files" };
+            std::vector<FetchJob> jobs{};
+            size_t cursor = 0;
+            size_t completed = 0;
+            hstring error{};
+            unsigned long long doneBytes = 0;
+            unsigned long long totalBytes = 0;
+            std::chrono::steady_clock::time_point t0{};
+            std::chrono::steady_clock::time_point lastReport{};
+            LogFn log{};
+            FileProgFn prog{};
+            WaitGroup wg{};
+
+            void Add(hstring url, std::filesystem::path dest, long long size, hstring sha1, hstring what)
+            {
+                FetchJob j{};
+                j.url = url;
+                j.dest = std::move(dest);
+                j.size = size;
+                j.sha1 = sha1;
+                j.what = what;
+                totalBytes += size > 0 ? static_cast<unsigned long long>(size) : 0;
+                jobs.push_back(std::move(j));
+            }
+
+            void Report(bool force = false)
+            {
+                if (!prog)
+                    return;
+                auto now = std::chrono::steady_clock::now();
+                // Thousands of tiny asset files would otherwise flood the UI
+                // thread with updates; 10/s is plenty smooth.
+                if (!force && lastReport.time_since_epoch().count() != 0 &&
+                    std::chrono::duration_cast<std::chrono::milliseconds>(now - lastReport).count() < 100)
+                    return;
+                lastReport = now;
+                double secs = std::chrono::duration<double>(now - t0).count();
+                wchar_t buf[96]{};
+                swprintf_s(buf, L"%s %zu/%zu", std::wstring{ label }.c_str(),
+                    completed, jobs.size());
+                prog(buf, doneBytes, totalBytes, secs > 0.05 ? doneBytes / secs : 0.0);
+            }
+        };
+
+        fire_and_forget FetchWorker(FetchBatch* b);
+
+        void StartFetchBatch(FetchBatch& b, size_t workers)
+        {
+            if (b.jobs.empty())
+                return;
+            b.t0 = std::chrono::steady_clock::now();
+            size_t n = (std::min)(workers, b.jobs.size());
+            for (size_t w = 0; w < n; ++w)
+            {
+                b.wg.Add();
+                FetchWorker(&b);
+            }
+        }
+
+        // Pulls the next job until the batch is exhausted; the first error
+        // stops this worker (the rest finish their current file).
+        fire_and_forget FetchWorker(FetchBatch* b)
+        {
+            for (;;)
+            {
+                size_t i = b->cursor++;
+                if (i >= b->jobs.size())
+                    break;
+                auto& job = b->jobs[i];
+                FileProgFn sub = [b, i](hstring const&, unsigned long long done,
+                    unsigned long long, double) {
+                    auto& j = b->jobs[i];
+                    if (done > j.lastDone)
+                    {
+                        b->doneBytes += done - j.lastDone;
+                        j.lastDone = done;
+                    }
+                    b->Report();
+                };
+                auto err = co_await FetchFile(job.url, job.dest, job.size, job.sha1,
+                    job.what, b->log, sub, /*quiet=*/true);
+                if (!err.empty())
+                {
+                    if (b->error.empty())
+                        b->error = err;
+                    break;
+                }
+                ++b->completed;
+            }
+            b->wg.Done();
+        }
     } // namespace
 
     fire_and_forget PrepareAsync(
         hstring mcVersion, hstring loader, hstring loaderVersion,
-        std::wstring const& gameDir, LogFn log, FileProgFn prog, DoneFn done)
+        std::wstring const& gameDir, std::wstring const& modsDir,
+        LogFn log, FileProgFn prog, DoneFn done)
     {
         auto fail = [&](hstring const& msg) { done(false, PreparedGame{}, msg); };
         PreparedGame game{};
@@ -251,6 +408,10 @@ namespace winrt::PretClient::Downloader
 
             log(L"Libraries...");
             std::vector<std::filesystem::path> nativeZips;
+            FetchBatch libBatch{};
+            libBatch.label = L"libraries";
+            libBatch.log = log;
+            libBatch.prog = prog;
             if (version.HasKey(L"libraries"))
             {
                 for (auto const& lv : version.GetNamedArray(L"libraries"))
@@ -278,13 +439,8 @@ namespace winrt::PretClient::Downloader
                             if (art.HasKey(L"size"))
                                 size = static_cast<long long>(art.GetNamedNumber(L"size"));
                             auto dest = libsDir / std::filesystem::path{ std::wstring{ rel } };
-                            if (auto err = co_await FetchFile(url, dest, size, sha1,
-                                    hstring{ L"lib " } + std::wstring{ name }, log, prog);
-                                !err.empty())
-                            {
-                                fail(err);
-                                co_return;
-                            }
+                            libBatch.Add(url, dest, size, sha1,
+                                hstring{ L"lib " } + std::wstring{ name });
                             if (IsNativesEntry(std::wstring{ name }))
                                 nativeZips.push_back(dest);
                         }
@@ -320,12 +476,7 @@ namespace winrt::PretClient::Downloader
                                 if (art.HasKey(L"size"))
                                     size = static_cast<long long>(art.GetNamedNumber(L"size"));
                                 auto dest = libsDir / std::filesystem::path{ std::wstring{ rel.empty() ? L"natives-legacy.jar" : rel } };
-                                if (auto err = co_await FetchFile(url, dest, size, sha1, L"legacy natives", log, prog);
-                                    !err.empty())
-                                {
-                                    fail(err);
-                                    co_return;
-                                }
+                                libBatch.Add(url, dest, size, sha1, L"legacy natives");
                                 nativeZips.push_back(dest);
                             }
                         }
@@ -365,13 +516,7 @@ namespace winrt::PretClient::Downloader
                     {
                     }
                     auto dest = libsDir / std::filesystem::path{ std::wstring{ rel } };
-                    if (auto err = co_await FetchFile(url, dest, size, sha1,
-                            hstring{ L"fabric " } + std::wstring{ name }, log, prog);
-                        !err.empty())
-                    {
-                        fail(err);
-                        co_return;
-                    }
+                    libBatch.Add(url, dest, size, sha1, hstring{ L"fabric " } + std::wstring{ name });
                     game.extraClasspath.push_back(hstring{ dest.wstring() });
                 }
                 game.fabricMainClass = OptStr(game.fabricProfile, L"mainClass");
@@ -392,6 +537,21 @@ namespace winrt::PretClient::Downloader
                     catch (...)
                     {
                     }
+                }
+            }
+
+            if (!libBatch.jobs.empty())
+            {
+                wchar_t nbuf[64]{};
+                swprintf_s(nbuf, L"  %zu library file(s) to fetch", libBatch.jobs.size());
+                log(nbuf);
+                StartFetchBatch(libBatch, 10);
+                co_await WaitAwaiter{ &libBatch.wg };
+                libBatch.Report(true);
+                if (!libBatch.error.empty())
+                {
+                    fail(libBatch.error);
+                    co_return;
                 }
             }
 
@@ -441,9 +601,13 @@ namespace winrt::PretClient::Downloader
                 std::string text((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
                 auto index = JsonObject::Parse(to_hstring(text));
                 auto objects = index.GetNamedObject(L"objects");
-                size_t done = 0, total = 0;
+                size_t total = 0;
                 for (auto const& kv : objects)
                     (void)kv, total++;
+                FetchBatch assetBatch{};
+                assetBatch.label = L"assets";
+                assetBatch.log = log;
+                assetBatch.prog = prog;
                 for (auto const& kv : objects)
                 {
                     auto o = kv.Value().GetObject();
@@ -466,25 +630,25 @@ namespace winrt::PretClient::Downloader
                         (size <= 0 || static_cast<long long>(std::filesystem::file_size(dest, ec2)) == size);
                     if (!present)
                     {
-                        hstring url = hstring{ L"https://resources.download.minecraft.net/" } + hs.substr(0, 2) + L"/" + hs;
-                        std::vector<std::uint8_t> bytes;
-                        try
-                        {
-                            bytes = Http::BufferToVector(co_await Http::GetBufferAsync(url, kUA));
-                        }
-                        catch (...)
-                        {
-                            fail(L"Asset fetch failed.");
-                            co_return;
-                        }
-                        if (!Http::WriteFile(dest, bytes))
-                        {
-                            fail(L"Asset write failed.");
-                            co_return;
-                        }
+                        hstring url = hstring{ L"https://resources.download.minecraft.net/" } +
+                            hs.substr(0, 2) + L"/" + hs;
+                        // The object hash is the file's SHA1, so verify it too.
+                        assetBatch.Add(url, dest, size, hash, L"asset " + hash.substr(0, 8));
                     }
-                    if (++done % 200 == 0)
-                        log(hstring{ L"  assets " } + to_hstring(done) + L"/" + to_hstring(total));
+                }
+                wchar_t mbuf[96]{};
+                swprintf_s(mbuf, L"  %zu of %zu asset(s) to fetch", assetBatch.jobs.size(), total);
+                log(mbuf);
+                if (!assetBatch.jobs.empty())
+                {
+                    StartFetchBatch(assetBatch, 10);
+                    co_await WaitAwaiter{ &assetBatch.wg };
+                    assetBatch.Report(true);
+                    if (!assetBatch.error.empty())
+                    {
+                        fail(assetBatch.error);
+                        co_return;
+                    }
                 }
             }
             catch (...)
@@ -525,8 +689,12 @@ namespace winrt::PretClient::Downloader
             if (isFabric)
             {
                 log(L"Fabric API...");
-                hstring msg = co_await Modrinth::EnsureFabricApiAsync(
-                    std::filesystem::path{ std::wstring{ game.gameDir } }.wstring(), vanillaId);
+                // Installs into the instance's own mods folder when it has
+                // one; the folder is staged into <gameDir>/mods at launch.
+                std::wstring target = modsDir.empty()
+                    ? (std::filesystem::path{ std::wstring{ game.gameDir } } / L"mods").wstring()
+                    : modsDir;
+                hstring msg = co_await Modrinth::EnsureFabricApiAsync(target, vanillaId);
                 log(hstring{ L"  " } + msg);
             }
 

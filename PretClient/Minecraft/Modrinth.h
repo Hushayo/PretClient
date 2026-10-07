@@ -55,7 +55,7 @@ namespace winrt::PretClient::Modrinth
     Windows::Foundation::IAsyncOperation<hstring> DownloadFileAsync(ModFile const& file, std::wstring const& destDir);
 
     // fabric-api (P7dR8mSH): newest listed file for (mc, fabric), skipped when
-    // a fabric-api*.jar already sits in <gameDir>/mods. Returns status text.
+    // a fabric-api*.jar already sits in modsDir. Returns status text.
     Windows::Foundation::IAsyncOperation<hstring> EnsureFabricApiAsync(
-        std::wstring const& gameDir, hstring mcVersion);
+        std::wstring const& modsDir, hstring mcVersion);
 }

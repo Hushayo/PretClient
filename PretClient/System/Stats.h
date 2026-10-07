@@ -1,7 +1,13 @@
 #pragma once
 
+#include <cstdint>
+#include <map>
+#include <mutex>
+
 // Live system + process stats for the instance cards.
 // Everything is best-effort: -1 / 0 means "unavailable", never throws.
+// Polling runs on a background thread (see InstancesPage), so shared
+// state is mutex-guarded.
 namespace winrt::PretClient::SystemStats
 {
     struct SystemSnapshot
@@ -37,9 +43,11 @@ namespace winrt::PretClient::SystemStats
             unsigned long long wall = 0;
         };
         std::map<std::uintptr_t, ProcSample> m_procs;
+        std::mutex m_procMutex;
 
         void* m_gpuQuery = nullptr;
         void* m_gpuCounter = nullptr;
         bool m_gpuDead = false;
+        void KillGpu();
     };
 }

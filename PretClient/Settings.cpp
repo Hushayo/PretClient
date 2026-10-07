@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "Settings.h"
 #include "Paths.h"
+#include <cwctype>
 #include <fstream>
 
 using namespace winrt;
@@ -115,5 +116,24 @@ namespace winrt::PretClient
         if (!s.gameDir.empty())
             return s.gameDir;
         return hstring{ Paths::DefaultGameDir().wstring() };
+    }
+
+    std::filesystem::path InstanceDir(Settings const& s, hstring const& instanceId)
+    {
+        auto base = std::filesystem::path{ std::wstring{ EffectiveGameDir(s) } };
+        std::wstring id{ instanceId };
+        for (auto& c : id)
+        {
+            if (!(iswalnum(c) || c == L'-' || c == L'_'))
+                c = L'_';
+        }
+        if (id.empty())
+            id = L"instance";
+        return base / L"instances" / id;
+    }
+
+    std::filesystem::path InstanceModsDir(Settings const& s, hstring const& instanceId)
+    {
+        return InstanceDir(s, instanceId) / L"mods";
     }
 }

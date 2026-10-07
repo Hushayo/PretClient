@@ -1,7 +1,9 @@
 #include "pch.h"
 #include "Stats.h"
 #include <algorithm>
+#include <chrono>
 #include <map>
+#include <mutex>
 #include <pdh.h>
 #include <pdhmsg.h>
 #include <psapi.h>
@@ -17,6 +19,18 @@ namespace winrt::PretClient::SystemStats
             u.HighPart = ft.dwHighDateTime;
             return u.QuadPart;
         }
+
+        // A PDH GPU collection that takes longer than this means the driver
+        // stack is wedged (dGPU power transition, broken counters, ...).
+        // Retire the counter instead of stalling the sampler thread forever.
+        constexpr long long kGpuStallMs = 2500;
+
+        long long ElapsedMs(std::chrono::steady_clock::time_point t0)
+        {
+            return std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - t0)
+                .count();
+        }
     } // namespace
 
     Sampler::Sampler()
@@ -31,6 +45,15 @@ namespace winrt::PretClient::SystemStats
     {
         if (m_gpuQuery)
             PdhCloseQuery(static_cast<PDH_HQUERY>(m_gpuQuery));
+    }
+
+    void Sampler::KillGpu()
+    {
+        if (m_gpuQuery)
+            PdhCloseQuery(static_cast<PDH_HQUERY>(m_gpuQuery));
+        m_gpuQuery = nullptr;
+        m_gpuCounter = nullptr;
+        m_gpuDead = true;
     }
 
     SystemSnapshot Sampler::PollSystem()
@@ -66,15 +89,20 @@ namespace winrt::PretClient::SystemStats
             }
 
             // GPU: sum of all 3D engine utilization counters, clamped to 100.
+            // A wedged driver stack can stall these calls for seconds (this
+            // froze the whole app when sampling ran on the UI thread), so a
+            // collection that takes too long retires the counter for good.
             if (!m_gpuDead)
             {
                 if (!m_gpuQuery)
                 {
+                    auto t0 = std::chrono::steady_clock::now();
                     PDH_HQUERY q = nullptr;
                     PDH_HCOUNTER c = nullptr;
-                    if (PdhOpenQueryW(nullptr, 0, &q) == ERROR_SUCCESS &&
+                    bool initOk = (PdhOpenQueryW(nullptr, 0, &q) == ERROR_SUCCESS &&
                         PdhAddCounterW(q, L"\\GPU Engine(*engtype_3D)\\Utilization Percentage", 0, &c) == ERROR_SUCCESS &&
-                        PdhCollectQueryData(q) == ERROR_SUCCESS)
+                        PdhCollectQueryData(q) == ERROR_SUCCESS);
+                    if (initOk && ElapsedMs(t0) <= kGpuStallMs)
                     {
                         m_gpuQuery = q;
                         m_gpuCounter = c;
@@ -86,10 +114,20 @@ namespace winrt::PretClient::SystemStats
                         m_gpuDead = true;
                     }
                 }
-                else if (PdhCollectQueryData(static_cast<PDH_HQUERY>(m_gpuQuery)) == ERROR_SUCCESS)
+                else
                 {
-                    DWORD size = 0;
-                    DWORD count = 0;
+                    auto t0 = std::chrono::steady_clock::now();
+                    bool collected =
+                        (PdhCollectQueryData(static_cast<PDH_HQUERY>(m_gpuQuery)) == ERROR_SUCCESS);
+                    bool stalled = (ElapsedMs(t0) > kGpuStallMs);
+                    if (stalled)
+                    {
+                        KillGpu();
+                    }
+                    else if (collected)
+                    {
+                        DWORD size = 0;
+                        DWORD count = 0;
                     if (PdhGetFormattedCounterArrayW(
                             static_cast<PDH_HCOUNTER>(m_gpuCounter), PDH_FMT_DOUBLE, &size, &count, nullptr) == PDH_MORE_DATA &&
                         size > 0)
@@ -108,6 +146,7 @@ namespace winrt::PretClient::SystemStats
                     }
                 }
             }
+        }
         }
         catch (...)
         {
@@ -130,6 +169,7 @@ namespace winrt::PretClient::SystemStats
             auto u = ToU64(user);
             auto w = ToU64(now);
             auto key = reinterpret_cast<std::uintptr_t>(h);
+            std::lock_guard<std::mutex> lk(m_procMutex);
             auto it = m_procs.find(key);
             if (it == m_procs.end())
             {
@@ -168,6 +208,7 @@ namespace winrt::PretClient::SystemStats
 
     void Sampler::Forget(void* processHandle)
     {
+        std::lock_guard<std::mutex> lk(m_procMutex);
         m_procs.erase(reinterpret_cast<std::uintptr_t>(processHandle));
     }
 }

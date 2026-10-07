@@ -2,6 +2,7 @@
 #include "Launcher.h"
 #include "Rules.h"
 #include <bcrypt.h>
+#include <mutex>
 
 using namespace winrt;
 using namespace Windows::Data::Json;
@@ -19,6 +20,14 @@ namespace winrt::PretClient::Launcher
         {
             static std::map<std::wstring, Session> s;
             return s;
+        }
+
+        // Guards Sessions(): stats polling now runs on a background thread
+        // while Start/Stop stay on the UI thread.
+        std::mutex& SessionsMutex()
+        {
+            static std::mutex m;
+            return m;
         }
 
         std::vector<std::uint8_t> Md5(std::string const& data)
@@ -325,17 +334,20 @@ namespace winrt::PretClient::Launcher
             }
             auto& sessions = Sessions();
             std::wstring key{ instanceId };
-            auto it = sessions.find(key);
-            if (it != sessions.end() && it->second.process)
             {
-                DWORD code = 0;
-                if (GetExitCodeProcess(it->second.process, &code) && code == STILL_ACTIVE)
+                std::lock_guard<std::mutex> lk(SessionsMutex());
+                auto it = sessions.find(key);
+                if (it != sessions.end() && it->second.process)
                 {
-                    error = L"Already running.";
-                    return false;
+                    DWORD code = 0;
+                    if (GetExitCodeProcess(it->second.process, &code) && code == STILL_ACTIVE)
+                    {
+                        error = L"Already running.";
+                        return false;
+                    }
+                    CloseHandle(it->second.process);
+                    sessions.erase(it);
                 }
-                CloseHandle(it->second.process);
-                sessions.erase(it);
             }
             std::error_code ec;
             std::filesystem::create_directories(std::filesystem::path{ std::wstring{ cmd.workDir } }, ec);
@@ -361,7 +373,10 @@ namespace winrt::PretClient::Launcher
                 return false;
             }
             CloseHandle(pi.hThread);
-            sessions[key] = Session{ pi.hProcess, pi.dwProcessId };
+            {
+                std::lock_guard<std::mutex> lk(SessionsMutex());
+                Sessions()[key] = Session{ pi.hProcess, pi.dwProcessId };
+            }
             return true;
         }
         catch (...)
@@ -375,6 +390,7 @@ namespace winrt::PretClient::Launcher
     {
         try
         {
+            std::lock_guard<std::mutex> lk(SessionsMutex());
             auto& sessions = Sessions();
             auto it = sessions.find(std::wstring{ instanceId });
             if (it == sessions.end())
@@ -395,6 +411,7 @@ namespace winrt::PretClient::Launcher
     {
         try
         {
+            std::lock_guard<std::mutex> lk(SessionsMutex());
             auto& sessions = Sessions();
             auto it = sessions.find(std::wstring{ instanceId });
             if (it == sessions.end() || !it->second.process)
@@ -420,6 +437,7 @@ namespace winrt::PretClient::Launcher
     {
         try
         {
+            std::lock_guard<std::mutex> lk(SessionsMutex());
             auto& sessions = Sessions();
             auto it = sessions.find(std::wstring{ instanceId });
             if (it == sessions.end())
@@ -436,6 +454,7 @@ namespace winrt::PretClient::Launcher
     {
         try
         {
+            std::lock_guard<std::mutex> lk(SessionsMutex());
             auto& sessions = Sessions();
             auto it = sessions.find(std::wstring{ instanceId });
             if (it == sessions.end())

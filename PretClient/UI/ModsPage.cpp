@@ -222,14 +222,14 @@ namespace winrt::PretClient
         SetStatus(hstring{ L"Resolving " } + hit.title + L"...");
         Modrinth::PickFileAsync(
             hit.projectId.empty() ? hit.slug : hit.projectId, mc, loader,
-            [this, hit](Modrinth::ModFile file) {
+            [this, hit, inst](Modrinth::ModFile file) {
                 if (file.url.empty())
                 {
                     SetStatus(L"No matching file (version/loader?). Try Builds for a specific one.");
                     return;
                 }
                 auto settings = LoadSettings();
-                auto mods = std::filesystem::path{ std::wstring{ EffectiveGameDir(settings) } } / L"mods";
+                auto mods = InstanceModsDir(settings, inst.id);
                 SetStatus(hstring{ L"Downloading " } + file.filename + L"...");
                 InstallOneFile(file, mods.wstring());
             });
@@ -277,7 +277,7 @@ namespace winrt::PretClient
         {
             auto inst = m_targets[static_cast<size_t>(m_target.SelectedIndex())];
             auto settings = LoadSettings();
-            modsDir = (std::filesystem::path{ std::wstring{ EffectiveGameDir(settings) } } / L"mods").wstring();
+            modsDir = InstanceModsDir(settings, inst.id).wstring();
             if (loader.empty() && inst.loader != L"vanilla")
                 loader = inst.loader;
             if (mc.empty())

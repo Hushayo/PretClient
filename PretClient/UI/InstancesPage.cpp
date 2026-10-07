@@ -3,6 +3,8 @@
 #include "Theme.h"
 #include "../Minecraft/Downloader.h"
 #include "../Minecraft/Fabric.h"
+#include "../Minecraft/Http.h"
+#include "../Minecraft/Modrinth.h"
 #include <algorithm>
 #include <fstream>
 #include <shellapi.h>
@@ -87,9 +89,10 @@ namespace winrt::PretClient
         m_root.Children().Append(m_cards);
         m_cards.Spacing(12);
 
-        m_timer = Microsoft::UI::Dispatching::DispatcherQueue::GetForCurrentThread().CreateTimer();
+        m_dispatcher = Microsoft::UI::Dispatching::DispatcherQueue::GetForCurrentThread();
+        m_timer = m_dispatcher.CreateTimer();
         m_timer.Interval(std::chrono::seconds{ 2 });
-        m_timer.Tick([this](auto&&, auto&&) { UpdateStats(); });
+        m_timer.Tick([this](auto&&, auto&&) { UpdateStatsAsync(); });
         m_timer.Start();
 
         Refresh();
@@ -210,19 +213,6 @@ namespace winrt::PretClient
 
             if (isFabric)
             {
-                TextBlock modsHead{};
-                modsHead.Style(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>());
-                modsHead.Opacity(0.7);
-                modsHead.Text(L"Mods in this instance:");
-                left.Children().Append(modsHead);
-            }
-            StackPanel modsBox{};
-            modsBox.Spacing(4);
-            if (isFabric)
-                left.Children().Append(modsBox);
-
-            if (isFabric)
-            {
                 TextBlock note{};
                 note.Style(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>());
                 note.Opacity(0.6);
@@ -262,6 +252,14 @@ namespace winrt::PretClient
             buttons.Children().Append(stop);
             buttons.Children().Append(restart);
 
+            if (isFabric)
+            {
+                Button modsBtn{};
+                modsBtn.Content(box_value(L"Mods"));
+                modsBtn.Click([this, id](IInspectable const&, RoutedEventArgs const&) { ModsDialog(id); });
+                buttons.Children().Append(modsBtn);
+            }
+
             Button del{};
             del.Content(box_value(L"Delete"));
             del.IsEnabled(!running);
@@ -291,102 +289,500 @@ namespace winrt::PretClient
             c.prog = prog;
             c.progText = progText;
             c.gamelog = gamelog;
-            c.modsBox = modsBox;
             m_cardList.push_back(std::move(c));
-            if (isFabric)
-                RefreshMods(m_cardList.back(), inst);
         }
-        UpdateStats();
+        UpdateStatsAsync();
     }
 
-    void InstancesPage::RefreshMods(Card& card, Instance const& inst)
+    namespace
     {
+        // One row of the mods dialog: what file it is plus the live widgets
+        // an async update check may want to touch later.
+        struct ModRow
+        {
+            std::filesystem::path file{};
+            bool enabled = true;
+            Microsoft::UI::Xaml::Controls::TextBlock status{};
+            Microsoft::UI::Xaml::Controls::StackPanel actions{};
+        };
+
+        struct VersionsWaiter
+        {
+            std::vector<Modrinth::ModVersion> versions{};
+            bool done = false;
+            std::coroutine_handle<> handle{};
+
+            bool await_ready() const
+            {
+                return done;
+            }
+            void await_suspend(std::coroutine_handle<> h)
+            {
+                handle = h;
+            }
+            std::vector<Modrinth::ModVersion> await_resume()
+            {
+                return std::move(versions);
+            }
+        };
+
+        std::vector<int> VersionParts(std::wstring s)
+        {
+            if (!s.empty() && (s[0] == L'v' || s[0] == L'V'))
+                s = s.substr(1);
+            if (auto dash = s.find(L'-'); dash != std::wstring::npos)
+                s = s.substr(0, dash);
+            std::vector<int> parts;
+            size_t start = 0;
+            while (start <= s.size())
+            {
+                auto dot = s.find(L'.', start);
+                auto token = s.substr(start, dot == std::wstring::npos ? std::wstring::npos : dot - start);
+                try
+                {
+                    parts.push_back(token.empty() ? 0 : std::stoi(token));
+                }
+                catch (...)
+                {
+                    parts.push_back(0);
+                }
+                if (dot == std::wstring::npos)
+                    break;
+                start = dot + 1;
+            }
+            return parts;
+        }
+
+        bool VersionNewer(std::wstring const& candidate, std::wstring const& current)
+        {
+            if (candidate.empty() || current.empty())
+                return false;
+            auto a = VersionParts(current);
+            auto b = VersionParts(candidate);
+            size_t n = (std::max)(a.size(), b.size());
+            a.resize(n, 0);
+            b.resize(n, 0);
+            for (size_t i = 0; i < n; ++i)
+            {
+                if (b[i] != a[i])
+                    return b[i] > a[i];
+            }
+            return false;
+        }
+
+        // Download the picked build over the old jar, drop the old file when
+        // the names differ, then rebuild the dialog list.
+        fire_and_forget ApplyModUpdate(ModRow row, Modrinth::ModFile file,
+            std::function<void()> refresh)
+        {
+            hstring msg;
+            try
+            {
+                msg = co_await Modrinth::DownloadFileAsync(file, row.file.parent_path().wstring());
+            }
+            catch (...)
+            {
+                msg = L"Download failed.";
+            }
+            std::wstring text{ msg };
+            bool ok = text.rfind(L"Installed", 0) == 0 || text.rfind(L"Already present", 0) == 0;
+            if (ok && row.file.filename() != std::filesystem::path{ std::wstring{ file.filename } }.filename())
+            {
+                std::error_code ec;
+                std::filesystem::remove(row.file, ec);
+                if (refresh)
+                    refresh();
+            }
+            if (row.status)
+                row.status.Text(msg);
+        }
+
+        // Ask Modrinth for the newest build of this mod on (mc, fabric) and,
+        // when it is newer than the jar's own fabric.mod.json version, add an
+        // Update button to the row.
+        fire_and_forget CheckModUpdate(ModRow row, hstring mc, std::function<void()> refresh)
+        {
+            try
+            {
+                if (row.status)
+                    row.status.Text(L"reading...");
+                std::string meta;
+                if (!Http::ZipEntryToString(row.file, L"fabric.mod.json", meta) || meta.empty())
+                {
+                    if (row.status)
+                        row.status.Text(L"no fabric.mod.json");
+                    co_return;
+                }
+                auto o = JsonObject::Parse(to_hstring(meta));
+                hstring modId;
+                hstring curVer;
+                try
+                {
+                    if (o.HasKey(L"id"))
+                        modId = o.GetNamedString(L"id");
+                    if (o.HasKey(L"version"))
+                        curVer = o.GetNamedString(L"version");
+                }
+                catch (...)
+                {
+                }
+                if (modId.empty() || curVer.empty())
+                {
+                    if (row.status)
+                        row.status.Text(L"cannot read mod id/version");
+                    co_return;
+                }
+                if (row.status)
+                    row.status.Text(hstring{ L"checking " } + modId + L"...");
+
+                VersionsWaiter wait{};
+                Modrinth::GetVersionsAsync(modId, mc, L"fabric",
+                    [&wait](std::vector<Modrinth::ModVersion> versions) {
+                        wait.versions = std::move(versions);
+                        wait.done = true;
+                        if (wait.handle)
+                        {
+                            auto h = wait.handle;
+                            wait.handle = {};
+                            h.resume();
+                        }
+                    });
+                auto versions = co_await wait;
+                if (versions.empty())
+                {
+                    if (row.status)
+                        row.status.Text(hstring{ L"no builds for " } + mc);
+                    co_return;
+                }
+                auto const& latest = versions.front();
+                if (!VersionNewer(std::wstring{ latest.versionNumber }, std::wstring{ curVer }))
+                {
+                    if (row.status)
+                        row.status.Text(hstring{ L"up to date (" } + curVer + L")");
+                    co_return;
+                }
+
+                Modrinth::ModFile file{};
+                for (auto const& f : latest.files)
+                {
+                    if (f.primary && !f.url.empty())
+                    {
+                        file = f;
+                        break;
+                    }
+                }
+                if (file.url.empty())
+                {
+                    for (auto const& f : latest.files)
+                    {
+                        if (!f.url.empty())
+                        {
+                            file = f;
+                            break;
+                        }
+                    }
+                }
+                if (file.url.empty())
+                {
+                    if (row.status)
+                        row.status.Text(L"latest build has no file");
+                    co_return;
+                }
+                if (row.status)
+                    row.status.Text(hstring{ L"update: " } + curVer + L" -> " + latest.versionNumber);
+                if (row.actions)
+                {
+                    Button upd{};
+                    upd.Content(box_value(L"Update"));
+                    upd.Click([row, file, refresh](IInspectable const&, RoutedEventArgs const&) {
+                        ApplyModUpdate(row, file, refresh);
+                    });
+                    row.actions.Children().Append(upd);
+                }
+            }
+            catch (...)
+            {
+                if (row.status)
+                    row.status.Text(L"update check failed");
+            }
+        }
+    } // namespace
+
+    void InstancesPage::StageMods(std::filesystem::path const& instanceMods,
+        std::filesystem::path const& gameMods)
+    {
+        // Fabric only reads <gameDir>/mods, but game files are shared by all
+        // instances, so the instance's own folder is staged in right before
+        // launch. *.jar.disabled files are deliberately left behind.
         try
         {
-            card.modsBox.Children().Clear();
-            auto settings = LoadSettings();
-            auto mods = std::filesystem::path{ std::wstring{ EffectiveGameDir(settings) } } / L"mods";
             std::error_code ec;
-            if (!std::filesystem::exists(mods, ec))
+            std::filesystem::create_directories(instanceMods, ec);
+            std::filesystem::create_directories(gameMods, ec);
+
+            // First time this instance gets its own folder: adopt the jars
+            // from the old shared layout so nothing silently disappears.
+            bool emptyInstance = true;
+            for (auto const& e : std::filesystem::directory_iterator(instanceMods, ec))
             {
-                TextBlock empty{};
-                empty.Text(L"(no mods installed)");
-                empty.Opacity(0.6);
-                empty.Style(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>());
-                card.modsBox.Children().Append(empty);
-                return;
+                if (e.is_regular_file(ec))
+                {
+                    emptyInstance = false;
+                    break;
+                }
             }
-            int count = 0;
-            for (auto const& e : std::filesystem::directory_iterator(mods, ec))
+            if (emptyInstance)
+            {
+                for (auto const& e : std::filesystem::directory_iterator(gameMods, ec))
+                {
+                    if (!e.is_regular_file(ec))
+                        continue;
+                    auto ext = e.path().extension().wstring();
+                    for (auto& c : ext)
+                        c = static_cast<wchar_t>(towlower(c));
+                    if (ext != L".jar")
+                        continue;
+                    std::filesystem::copy_file(e.path(), instanceMods / e.path().filename(),
+                        std::filesystem::copy_options::overwrite_existing, ec);
+                }
+            }
+
+            // Collect first: erasing entries while a directory_iterator is
+            // mid-walk can truncate the walk on Windows.
+            std::vector<std::filesystem::path> sharedJars;
+            for (auto const& e : std::filesystem::directory_iterator(gameMods, ec))
             {
                 if (!e.is_regular_file(ec))
                     continue;
                 auto ext = e.path().extension().wstring();
                 for (auto& c : ext)
                     c = static_cast<wchar_t>(towlower(c));
-                if (ext != L".jar" && ext != L".disabled")
-                    continue;
-                hstring fname{ e.path().filename().wstring() };
-                StackPanel row{};
-                row.Orientation(Orientation::Horizontal);
-                row.Spacing(8);
-                TextBlock t{};
-                t.Text(fname);
-                t.Style(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>());
-                t.VerticalAlignment(VerticalAlignment::Center);
-                t.MaxWidth(420);
-                t.TextTrimming(TextTrimming::CharacterEllipsis);
-                row.Children().Append(t);
-                Button rm{};
-                rm.Content(box_value(L"Remove"));
-                rm.Click([this, id = card.id, fname](IInspectable const&, RoutedEventArgs const&) {
-                    try
-                    {
-                        auto s = LoadSettings();
-                        auto p = std::filesystem::path{ std::wstring{ EffectiveGameDir(s) } } / L"mods" /
-                            std::filesystem::path{ std::wstring{ fname } };
-                        std::error_code ec2;
-                        std::filesystem::remove(p, ec2);
-                        SetStatus(hstring{ L"Removed " } + fname);
-                    }
-                    catch (...)
-                    {
-                    }
-                    Refresh();
-                });
-                row.Children().Append(rm);
-                card.modsBox.Children().Append(row);
-                if (++count >= 50)
-                    break;
+                if (ext == L".jar")
+                    sharedJars.push_back(e.path());
             }
-            if (count == 0)
+            for (auto const& p : sharedJars)
+                std::filesystem::remove(p, ec);
+            for (auto const& e : std::filesystem::directory_iterator(instanceMods, ec))
             {
-                TextBlock empty{};
-                empty.Text(L"(no mods installed)");
-                empty.Opacity(0.6);
-                empty.Style(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>());
-                card.modsBox.Children().Append(empty);
+                if (!e.is_regular_file(ec))
+                    continue;
+                auto ext = e.path().extension().wstring();
+                for (auto& c : ext)
+                    c = static_cast<wchar_t>(towlower(c));
+                if (ext != L".jar")
+                    continue;
+                std::filesystem::copy_file(e.path(), gameMods / e.path().filename(),
+                    std::filesystem::copy_options::overwrite_existing, ec);
             }
-            Button open{};
-            open.Content(box_value(L"Open mods folder"));
-            open.Click([](IInspectable const&, RoutedEventArgs const&) {
-                try
-                {
-                    auto s = LoadSettings();
-                    auto p = std::filesystem::path{ std::wstring{ EffectiveGameDir(s) } } / L"mods";
-                    std::error_code ec3;
-                    std::filesystem::create_directories(p, ec3);
-                    ShellExecuteW(nullptr, L"open", p.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
-                }
-                catch (...)
-                {
-                }
-            });
-            card.modsBox.Children().Append(open);
         }
         catch (...)
         {
         }
+    }
+
+    fire_and_forget InstancesPage::ModsDialog(hstring id)
+    {
+        auto settings = LoadSettings();
+        auto modsDir = InstanceModsDir(settings, id);
+        std::error_code ec;
+        std::filesystem::create_directories(modsDir, ec);
+
+        hstring mc;
+        hstring instName;
+        for (auto const& i : LoadInstances())
+        {
+            if (i.id == id)
+            {
+                mc = i.mcVersion;
+                instName = i.name;
+                break;
+            }
+        }
+        if (instName.empty())
+        {
+            SetStatus(L"Instance is gone.");
+            co_return;
+        }
+
+        StackPanel panel{};
+        panel.Spacing(8);
+
+        TextBlock dirText{};
+        dirText.Style(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>());
+        dirText.Opacity(0.5);
+        dirText.TextWrapping(TextWrapping::Wrap);
+        panel.Children().Append(dirText);
+
+        StackPanel tools{};
+        tools.Orientation(Orientation::Horizontal);
+        tools.Spacing(8);
+        panel.Children().Append(tools);
+
+        StackPanel list{};
+        list.Spacing(6);
+        panel.Children().Append(list);
+
+        TextBlock status{};
+        status.Style(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>());
+        status.Opacity(0.7);
+        status.TextWrapping(TextWrapping::Wrap);
+        panel.Children().Append(status);
+
+        auto rows = std::make_shared<std::vector<ModRow>>();
+        auto rebuild = std::make_shared<std::function<void()>>();
+        *rebuild = [rows, list, dirText, modsDir, status]() {
+            try
+            {
+                list.Children().Clear();
+                rows->clear();
+                std::error_code e;
+                std::vector<std::filesystem::path> files;
+                if (std::filesystem::exists(modsDir, e))
+                {
+                    for (auto const& en : std::filesystem::directory_iterator(modsDir, e))
+                    {
+                        if (!en.is_regular_file(e))
+                            continue;
+                        auto ext = en.path().extension().wstring();
+                        for (auto& c : ext)
+                            c = static_cast<wchar_t>(towlower(c));
+                        if (ext != L".jar" && ext != L".disabled")
+                            continue;
+                        files.push_back(en.path());
+                    }
+                }
+                std::sort(files.begin(), files.end());
+
+                int count = 0;
+                for (auto const& p : files)
+                {
+                    auto ext = p.extension().wstring();
+                    for (auto& c : ext)
+                        c = static_cast<wchar_t>(towlower(c));
+                    bool enabled = (ext == L".jar");
+
+                    StackPanel row{};
+                    row.Orientation(Orientation::Horizontal);
+                    row.Spacing(8);
+
+                    TextBlock t{};
+                    t.Text(hstring{ p.filename().wstring() });
+                    t.Style(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>());
+                    t.VerticalAlignment(VerticalAlignment::Center);
+                    t.MaxWidth(340);
+                    t.TextTrimming(TextTrimming::CharacterEllipsis);
+                    row.Children().Append(t);
+
+                    TextBlock st{};
+                    st.Style(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>());
+                    st.Opacity(0.7);
+                    st.Width(190);
+                    st.VerticalAlignment(VerticalAlignment::Center);
+                    st.Text(enabled ? L"" : L"disabled");
+                    row.Children().Append(st);
+
+                    StackPanel actions{};
+                    actions.Orientation(Orientation::Horizontal);
+                    actions.Spacing(6);
+                    actions.VerticalAlignment(VerticalAlignment::Center);
+                    row.Children().Append(actions);
+
+                    ModRow state{};
+                    state.file = p;
+                    state.enabled = enabled;
+                    state.status = st;
+                    state.actions = actions;
+
+                    Button toggle{};
+                    toggle.Content(box_value(enabled ? L"Disable" : L"Enable"));
+                    toggle.Click([rebuild, p, enabled](IInspectable const&, RoutedEventArgs const&) {
+                        std::error_code e2;
+                        std::filesystem::path target;
+                        if (enabled)
+                            target = std::filesystem::path{ p.wstring() + L".disabled" };
+                        else
+                        {
+                            std::wstring w{ p.wstring() };
+                            if (w.size() > 9 && w.substr(w.size() - 9) == L".disabled")
+                                w = w.substr(0, w.size() - 9);
+                            target = std::filesystem::path{ w };
+                        }
+                        std::filesystem::rename(p, target, e2);
+                        if (rebuild && *rebuild)
+                            (*rebuild)();
+                    });
+                    actions.Children().Append(toggle);
+
+                    Button rm{};
+                    rm.Content(box_value(L"Remove"));
+                    rm.Click([rebuild, p, status](IInspectable const&, RoutedEventArgs const&) {
+                        std::error_code e2;
+                        std::filesystem::remove(p, e2);
+                        if (status)
+                            status.Text(hstring{ L"Removed " } + hstring{ p.filename().wstring() });
+                        if (rebuild && *rebuild)
+                            (*rebuild)();
+                    });
+                    actions.Children().Append(rm);
+
+                    rows->push_back(state);
+                    if (++count >= 60)
+                        break;
+                }
+
+                wchar_t dbuf[512]{};
+                swprintf_s(dbuf, L"Folder: %s  (%d mod(s))",
+                    std::wstring{ modsDir.wstring() }.c_str(), count);
+                dirText.Text(dbuf);
+                if (count == 0)
+                {
+                    TextBlock empty{};
+                    empty.Text(L"No mods in this instance yet. Install some from the Mods page.");
+                    empty.Opacity(0.6);
+                    empty.Style(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>());
+                    empty.TextWrapping(TextWrapping::Wrap);
+                    list.Children().Append(empty);
+                }
+            }
+            catch (...)
+            {
+            }
+        };
+        (*rebuild)();
+
+        Button openBtn{};
+        openBtn.Content(box_value(L"Open folder"));
+        openBtn.Click([modsDir](IInspectable const&, RoutedEventArgs const&) {
+            std::error_code e;
+            std::filesystem::create_directories(modsDir, e);
+            ShellExecuteW(nullptr, L"open", modsDir.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+        });
+        tools.Children().Append(openBtn);
+
+        Button check{};
+        check.Content(box_value(L"Check for updates"));
+        check.Click([rows, mc, rebuild, status](IInspectable const&, RoutedEventArgs const&) {
+            if (rows->empty())
+            {
+                if (status)
+                    status.Text(L"No mods to check.");
+                return;
+            }
+            if (status)
+                status.Text(hstring{ L"Checking " } + to_hstring(rows->size()) +
+                    L" mod(s) against Modrinth for " + mc + L"...");
+            std::function<void()> refresh = *rebuild;
+            for (auto const& r : *rows)
+                CheckModUpdate(r, mc, refresh);
+        });
+        tools.Children().Append(check);
+
+        ContentDialog dialog{};
+        dialog.Title(box_value(hstring{ L"Mods - " } + instName));
+        dialog.Content(panel);
+        dialog.CloseButtonText(L"Close");
+        dialog.XamlRoot(m_root.XamlRoot());
+        co_await dialog.ShowAsync();
     }
 
     hstring InstancesPage::TailText(std::filesystem::path const& file)
@@ -417,41 +813,83 @@ namespace winrt::PretClient
         }
     }
 
-    void InstancesPage::UpdateStats()
+    fire_and_forget InstancesPage::UpdateStatsAsync()
     {
+        bool expected = false;
+        if (!m_statsBusy.compare_exchange_strong(expected, true))
+            co_return; // previous sample still running; skip, never stack
+        struct BusyGuard
+        {
+            std::atomic<bool>& flag;
+            ~BusyGuard()
+            {
+                flag.store(false);
+            }
+        };
+        BusyGuard guard{ m_statsBusy };
         try
         {
+            // Snapshot on the UI thread: Refresh() mutates this list here.
+            std::vector<hstring> ids;
+            for (auto const& card : m_cardList)
+                ids.push_back(card.id);
+            auto logFile = std::filesystem::path{ std::wstring{ EffectiveGameDir(LoadSettings()) } } /
+                L"logs-pretclient" / L"latest.txt";
+
+            co_await winrt::resume_background();
+            // Everything below may block (PDH, process queries, disk reads)
+            // and now runs off the UI thread.
             auto sys = m_sampler.PollSystem();
-            for (auto& card : m_cardList)
+            struct Row
             {
-                if (!Launcher::IsRunning(card.id))
+                hstring id{};
+                bool running = false;
+                void* handle = nullptr;
+                unsigned long pid = 0;
+                double cpu = -1.0;
+                unsigned long long ram = 0;
+                hstring tail{};
+            };
+            std::vector<Row> rows;
+            for (auto const& id : ids)
+            {
+                Row r{};
+                r.id = id;
+                r.running = Launcher::IsRunning(id);
+                if (!r.running)
                 {
-                    card.stats.Text(L"Idle");
-                    card.gamelog.Visibility(Visibility::Collapsed);
+                    rows.push_back(std::move(r));
                     continue;
                 }
-                void* h = Launcher::RawHandle(card.id);
-                double cpu = m_sampler.PollProcessCpu(h);
-                auto ram = m_sampler.ProcessPrivateBytes(h);
+                r.handle = Launcher::RawHandle(id);
+                r.pid = Launcher::Pid(id);
+                r.cpu = m_sampler.PollProcessCpu(r.handle);
+                r.ram = m_sampler.ProcessPrivateBytes(r.handle);
+                r.tail = TailText(logFile);
+                rows.push_back(std::move(r));
+            }
+
+            co_await winrt::resume_foreground(m_dispatcher);
+            for (auto const& r : rows)
+            {
+                auto* card = FindCard(r.id);
+                if (!card)
+                    continue;
+                if (!r.running)
+                {
+                    card->stats.Text(L"Idle");
+                    card->gamelog.Visibility(Visibility::Collapsed);
+                    continue;
+                }
                 wchar_t buf[192]{};
                 swprintf_s(buf, L"pid %lu | CPU %s | RAM %s | GPU %s",
-                    Launcher::Pid(card.id),
-                    Pct(cpu).c_str(), FormatBytes(ram).c_str(), Pct(sys.gpuPercent).c_str());
-                card.stats.Text(buf);
-                try
+                    r.pid,
+                    Pct(r.cpu).c_str(), FormatBytes(r.ram).c_str(), Pct(sys.gpuPercent).c_str());
+                card->stats.Text(buf);
+                if (!r.tail.empty())
                 {
-                    auto s = LoadSettings();
-                    auto log = std::filesystem::path{ std::wstring{ EffectiveGameDir(s) } } /
-                        L"logs-pretclient" / L"latest.txt";
-                    auto tail = TailText(log);
-                    if (!tail.empty())
-                    {
-                        card.gamelog.Text(tail);
-                        card.gamelog.Visibility(Visibility::Visible);
-                    }
-                }
-                catch (...)
-                {
+                    card->gamelog.Text(r.tail);
+                    card->gamelog.Visibility(Visibility::Visible);
                 }
             }
         }
@@ -481,6 +919,9 @@ namespace winrt::PretClient
         }
         auto settings = LoadSettings();
         std::wstring gameDir{ EffectiveGameDir(settings) };
+        auto instanceMods = InstanceModsDir(settings, id);
+        auto gameMods = std::filesystem::path{ gameDir } / L"mods";
+        bool isFabric = (inst.loader == L"fabric");
         hstring username = settings.username.empty() ? hstring{ L"Steve" } : settings.username;
         int minMem = settings.minMemMb;
         int maxMem = settings.maxMemMb;
@@ -541,14 +982,18 @@ namespace winrt::PretClient
             card->progText.Text(buf);
         };
         Downloader::PrepareAsync(
-            inst.mcVersion, inst.loader, inst.loaderVersion, gameDir, logCb, progCb,
-            [this, id, settings, username, minMem, maxMem, fail](
+            inst.mcVersion, inst.loader, inst.loaderVersion, gameDir,
+            isFabric ? std::wstring{ instanceMods.wstring() } : std::wstring{},
+            logCb, progCb,
+            [this, id, settings, username, minMem, maxMem, fail, isFabric, instanceMods, gameMods](
                 bool ok, Downloader::PreparedGame game, hstring error) {
                 if (!ok)
                 {
                     fail(hstring{ L"Prepare failed: " } + error);
                     return;
                 }
+                if (isFabric)
+                    StageMods(instanceMods, gameMods);
                 hstring javaExe = settings.javaPath;
                 if (!javaExe.empty())
                 {

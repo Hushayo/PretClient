@@ -286,12 +286,14 @@ namespace winrt::PretClient::Modrinth
         co_return status;
     }
 
-    IAsyncOperation<hstring> EnsureFabricApiAsync(std::wstring const& gameDir, hstring mcVersion)
+    // modsDir is the exact folder to install fabric-api into (no /mods
+    // appended -- callers decide: shared game dir or an instance's own).
+    IAsyncOperation<hstring> EnsureFabricApiAsync(std::wstring const& modsDir, hstring mcVersion)
     {
         hstring status = L"Fabric API check failed.";
         try
         {
-            auto mods = std::filesystem::path{ gameDir } / L"mods";
+            auto mods = std::filesystem::path{ modsDir };
             std::error_code ec;
             if (std::filesystem::exists(mods, ec))
             {
