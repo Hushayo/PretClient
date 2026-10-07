@@ -18,7 +18,7 @@ namespace winrt::PretClient
     struct LocalServerPage
     {
         LocalServerPage();
-        Microsoft::UI::Xaml::Controls::StackPanel Root() const
+        Microsoft::UI::Xaml::Controls::ScrollViewer Root() const
         {
             return m_root;
         }
@@ -59,7 +59,8 @@ namespace winrt::PretClient
         static void PaintGraph(Microsoft::UI::Xaml::Shapes::Polyline const& line,
             std::deque<double> const& hist);
 
-        Microsoft::UI::Xaml::Controls::StackPanel m_root{};
+        Microsoft::UI::Xaml::Controls::ScrollViewer m_root{};
+        Microsoft::UI::Xaml::Controls::StackPanel m_inner{};
         Microsoft::UI::Xaml::Controls::Button m_create{};
         Microsoft::UI::Xaml::Controls::TextBlock m_status{};
         Microsoft::UI::Xaml::Controls::ProgressBar m_progress{};

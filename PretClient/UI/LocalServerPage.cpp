@@ -148,13 +148,13 @@ namespace winrt::PretClient
     {
         m_ui = Microsoft::UI::Dispatching::DispatcherQueue::GetForCurrentThread();
 
-        m_root.Spacing(12);
-        m_root.Padding(ThicknessHelper::FromUniformLength(24));
+        m_inner.Spacing(12);
+        m_inner.Padding(ThicknessHelper::FromUniformLength(24));
 
         TextBlock head{};
         head.Text(L"Local Server");
         head.Style(Application::Current().Resources().Lookup(box_value(L"TitleLargeTextBlockStyle")).as<Style>());
-        m_root.Children().Append(head);
+        m_inner.Children().Append(head);
 
         // Explicit blue (not AccentButtonStyle: the app tints the accent
         // ramp green, so accent would render green here).
@@ -164,25 +164,33 @@ namespace winrt::PretClient
         m_create.Foreground(Media::SolidColorBrush{
             Windows::UI::ColorHelper::FromArgb(0xFF, 0xFF, 0xFF, 0xFF) });
         m_create.Click([this](IInspectable const&, RoutedEventArgs const&) { OpenCreateDialog(); });
-        m_root.Children().Append(m_create);
+        m_inner.Children().Append(m_create);
 
         m_progress.Minimum(0);
         m_progress.Maximum(100);
         m_progress.Width(320);
         m_progress.HorizontalAlignment(HorizontalAlignment::Left);
         m_progress.Visibility(Visibility::Collapsed);
-        m_root.Children().Append(m_progress);
+        m_inner.Children().Append(m_progress);
 
         m_status.Opacity(0.7);
         m_status.TextWrapping(TextWrapping::Wrap);
-        m_root.Children().Append(m_status);
+        m_inner.Children().Append(m_status);
 
         m_servers.Spacing(8);
-        m_root.Children().Append(m_servers);
+        m_inner.Children().Append(m_servers);
 
         m_detail.Spacing(12);
         m_detail.Visibility(Visibility::Collapsed);
-        m_root.Children().Append(m_detail);
+        m_inner.Children().Append(m_detail);
+
+        // Outer scroll so the Manage detail view (console + resources +
+        // plugins/mods + files + backups) stays reachable in short windows.
+        // The console keeps its own inner ScrollViewer (MaxHeight 260).
+        m_root.Content(m_inner);
+        m_root.VerticalScrollBarVisibility(ScrollBarVisibility::Auto);
+        m_root.HorizontalScrollBarVisibility(ScrollBarVisibility::Disabled);
+        m_root.HorizontalScrollMode(ScrollMode::Disabled);
 
         // Pump server output into the backlog + live detail view.
         Server::SetConsoleSink(
