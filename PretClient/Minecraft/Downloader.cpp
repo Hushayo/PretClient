@@ -710,17 +710,7 @@ namespace winrt::PretClient::Downloader
                     ? (std::filesystem::path{ std::wstring{ game.gameDir } } / L"mods").wstring()
                     : modsDir;
                 hstring msg = co_await Modrinth::EnsureFabricApiAsync(target, vanillaId);
-                if (msg.find(L"already present") == std::wstring::npos &&
-                    msg.find(L"No Fabric API") == std::wstring::npos &&
-                    msg.find(L"Installed ") == std::wstring::npos &&
-                    msg.find(L"Download failed") == std::wstring::npos)
-                {
-                    log(hstring{ L"  " } + msg);
-                }
-                else
-                {
-                    log(hstring{ L"  " } + msg);
-                }
+                log(hstring{ L"  " } + msg);
             }
 
             log(L"Ready.");
