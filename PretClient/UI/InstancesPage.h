@@ -3,6 +3,7 @@
 #include "../Minecraft/Instance.h"
 #include "../System/Stats.h"
 #include <atomic>
+#include <filesystem>
 
 // Instances page: long cards with loader badge, version, live CPU/RAM/GPU,
 // game log, progress bar with speed, Play / Stop / Restart, per-instance
@@ -11,6 +12,11 @@
 // (release/snapshot/beta/alpha).
 namespace winrt::PretClient
 {
+    namespace Downloader
+    {
+        struct PreparedGame;
+    }
+
     struct InstancesPage
     {
         InstancesPage();
@@ -45,6 +51,12 @@ namespace winrt::PretClient
         static void StageMods(std::filesystem::path const& instanceMods,
             std::filesystem::path const& gameMods);
         winrt::fire_and_forget PlayInstance(hstring id);
+        // Post-prepare launch: mod staging + Java probing run on a
+        // background thread (process spawns with long waits must never block
+        // the UI thread), then the build/start happens back on top of it.
+        winrt::fire_and_forget FinishLaunch(hstring id, hstring username, hstring javaPath,
+            int minMem, int maxMem, Downloader::PreparedGame game, bool isFabric,
+            std::filesystem::path instanceMods, std::filesystem::path gameMods);
         winrt::fire_and_forget ModsDialog(hstring id);
         winrt::fire_and_forget AddDialog();
         winrt::fire_and_forget ShowCreateDialog(

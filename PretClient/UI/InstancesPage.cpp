@@ -948,6 +948,7 @@ namespace winrt::PretClient
         auto gameMods = std::filesystem::path{ gameDir } / L"mods";
         bool isFabric = (inst.loader == L"fabric");
         hstring username = settings.username.empty() ? hstring{ L"Steve" } : settings.username;
+        hstring javaPath = settings.javaPath;
         int minMem = settings.minMemMb;
         int maxMem = settings.maxMemMb;
 
@@ -1010,47 +1011,64 @@ namespace winrt::PretClient
             inst.mcVersion, inst.loader, inst.loaderVersion, gameDir,
             isFabric ? std::wstring{ instanceMods.wstring() } : std::wstring{},
             logCb, progCb,
-            [this, id, settings, username, minMem, maxMem, fail, isFabric, instanceMods, gameMods](
+            [this, id, username, javaPath, minMem, maxMem, fail, isFabric, instanceMods, gameMods](
                 bool ok, Downloader::PreparedGame game, hstring error) {
                 if (!ok)
                 {
                     fail(hstring{ L"Prepare failed: " } + error);
                     return;
                 }
-                if (isFabric)
-                    StageMods(instanceMods, gameMods);
-                hstring javaExe = settings.javaPath;
-                if (!javaExe.empty())
-                {
-                    auto v = Java::Verify(javaExe);
-                    if (v.major < game.javaMajor)
-                    {
-                        SetStatus(hstring{ L"Configured Java is too old (need " } +
-                            to_hstring(game.javaMajor) + L"+). Auto-detecting...");
-                        javaExe = L"";
-                    }
-                }
-                if (javaExe.empty())
-                {
-                    SetStatus(hstring{ L"Locating Java " } + to_hstring(game.javaMajor) + L"+...");
-                    javaExe = Java::Pick(game.javaMajor);
-                }
-                if (javaExe.empty())
-                {
-                    fail(hstring{ L"No Java " } + to_hstring(game.javaMajor) +
-                        L"+ found. Install one or set a path in Settings.");
-                    return;
-                }
-                auto uuid = Launcher::OfflineUuid(username);
-                auto cmd = Launcher::BuildCommand(game, username, uuid, minMem, maxMem, javaExe);
-                hstring err;
-                if (Launcher::Start(cmd, id, err))
-                    SetStatus(hstring{ L"Running (pid " } + to_hstring(static_cast<std::uint32_t>(Launcher::Pid(id))) +
-                        L"). Game log below and in logs-pretclient/latest.txt");
-                else
-                    SetStatus(hstring{ L"Launch failed: " } + err);
-                Refresh();
+                FinishLaunch(id, username, javaPath, minMem, maxMem,
+                    std::move(game), isFabric, instanceMods, gameMods);
             });
+    }
+
+    fire_and_forget InstancesPage::FinishLaunch(hstring id, hstring username, hstring javaPath,
+        int minMem, int maxMem, Downloader::PreparedGame game, bool isFabric,
+        std::filesystem::path instanceMods, std::filesystem::path gameMods)
+    {
+        auto failed = [this, id](hstring const& msg) {
+            SetStatus(msg);
+            if (auto* card = FindCard(id))
+            {
+                card->prog.Visibility(Visibility::Collapsed);
+                card->progText.Visibility(Visibility::Collapsed);
+            }
+            Refresh();
+        };
+
+        SetStatus(hstring{ L"Locating Java " } + to_hstring(game.javaMajor) + L"+...");
+        co_await winrt::resume_background();
+        // Everything down to the foreground hop may block (disk copies,
+        // java -version probes with long waits) and now runs off the UI.
+        if (isFabric)
+            StageMods(instanceMods, gameMods);
+        hstring javaExe = javaPath;
+        if (!javaExe.empty())
+        {
+            auto v = Java::Verify(javaExe);
+            if (v.major < game.javaMajor)
+                javaExe = L"";
+        }
+        if (javaExe.empty())
+            javaExe = Java::Pick(game.javaMajor);
+
+        co_await ForegroundAwait{ m_dispatcher };
+        if (javaExe.empty())
+        {
+            failed(hstring{ L"No Java " } + to_hstring(game.javaMajor) +
+                L"+ found. Install one or set a path in Settings.");
+            co_return;
+        }
+        auto uuid = Launcher::OfflineUuid(username);
+        auto cmd = Launcher::BuildCommand(game, username, uuid, minMem, maxMem, javaExe);
+        hstring err;
+        if (Launcher::Start(cmd, id, err))
+            SetStatus(hstring{ L"Running (pid " } + to_hstring(static_cast<std::uint32_t>(Launcher::Pid(id))) +
+                L"). Game log below and in logs-pretclient/latest.txt");
+        else
+            SetStatus(hstring{ L"Launch failed: " } + err);
+        Refresh();
     }
 
     fire_and_forget InstancesPage::AddDialog()

@@ -31,8 +31,12 @@ namespace winrt::PretClient::Downloader
     using FileProgFn = std::function<void(hstring file, unsigned long long done, unsigned long long total, double bps)>;
     using DoneFn = std::function<void(bool ok, PreparedGame game, hstring error)>;
 
+    // NOTE: gameDir/modsDir are BY VALUE on purpose. PrepareAsync is
+    // fire_and_forget: the caller returns while downloads are still in
+    // flight, so const-ref params would dangle (this caused "bad
+    // allocation" prepare failures). Do not change back to references.
     winrt::fire_and_forget PrepareAsync(
         hstring mcVersion, hstring loader, hstring loaderVersion,
-        std::wstring const& gameDir, std::wstring const& modsDir,
+        std::wstring gameDir, std::wstring modsDir,
         LogFn log, FileProgFn prog, DoneFn done);
 }

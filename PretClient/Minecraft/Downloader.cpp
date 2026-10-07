@@ -249,7 +249,7 @@ namespace winrt::PretClient::Downloader
 
     fire_and_forget PrepareAsync(
         hstring mcVersion, hstring loader, hstring loaderVersion,
-        std::wstring const& gameDir, std::wstring const& modsDir,
+        std::wstring gameDir, std::wstring modsDir,
         LogFn log, FileProgFn prog, DoneFn done)
     {
         auto fail = [&](hstring const& msg) { done(false, PreparedGame{}, msg); };
