@@ -23,10 +23,6 @@ using namespace Microsoft::UI::Xaml::Input;
 using namespace Microsoft::UI::Xaml::Shapes;
 using namespace Windows::Foundation;
 
-// Polyline exists in both the WinUI and the SDK XAML Shapes namespaces, so the
-// using-directives above make the bare name ambiguous. An alias-declaration
-// wins over using-directive lookup and pins the WinUI one everywhere.
-using Polyline = Microsoft::UI::Xaml::Shapes::Polyline;
 
 namespace winrt::PretClient
 {
@@ -1031,7 +1027,7 @@ namespace winrt::PretClient
             m_dProc.Opacity(0.7);
             m_dProc.TextWrapping(TextWrapping::Wrap);
             resCol.Children().Append(m_dProc);
-            auto addGraph = [&](wchar_t const* name, TextBlock& value, Polyline& line,
+            auto addGraph = [&](wchar_t const* name, TextBlock& value, Microsoft::UI::Xaml::Shapes::Polyline& line,
                 Windows::UI::Color color) {
                 StackPanel row{};
                 row.Spacing(4);
@@ -1046,7 +1042,7 @@ namespace winrt::PretClient
                 top.Children().Append(lab);
                 top.Children().Append(value);
                 row.Children().Append(top);
-                line = Polyline{};
+                line = Microsoft::UI::Xaml::Shapes::Polyline{};
                 line.Stroke(Media::SolidColorBrush{ color });
                 line.StrokeThickness(2);
                 Canvas canvas{};
@@ -1066,9 +1062,9 @@ namespace winrt::PretClient
             m_dCpuValue = TextBlock{};
             m_dMemValue = TextBlock{};
             m_dDiskValue = TextBlock{};
-            m_dCpuLine = Polyline{};
-            m_dMemLine = Polyline{};
-            m_dDiskLine = Polyline{};
+            m_dCpuLine = Microsoft::UI::Xaml::Shapes::Polyline{};
+            m_dMemLine = Microsoft::UI::Xaml::Shapes::Polyline{};
+            m_dDiskLine = Microsoft::UI::Xaml::Shapes::Polyline{};
             addGraph(L"CPU", m_dCpuValue, m_dCpuLine,
                 Windows::UI::ColorHelper::FromArgb(0xFF, 0x44, 0xBD, 0x32));
             addGraph(L"Memory", m_dMemValue, m_dMemLine,
