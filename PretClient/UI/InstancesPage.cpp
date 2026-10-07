@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "InstancesPage.h"
+#include <winrt/Windows.Foundation.h>
 #include "Theme.h"
 #include "../Minecraft/Downloader.h"
 #include "../Minecraft/Fabric.h"
@@ -630,7 +631,8 @@ namespace winrt::PretClient
 
         auto rows = std::make_shared<std::vector<ModRow>>();
         auto rebuild = std::make_shared<std::function<void()>>();
-        *rebuild = [rows, list, dirText, modsDir, status]() {
+        *rebuild = [rows, list, dirText, modsDir, status,
+            weak = std::weak_ptr<std::function<void()>>(rebuild)]() {
             try
             {
                 list.Children().Clear();
@@ -695,7 +697,7 @@ namespace winrt::PretClient
 
                     Button toggle{};
                     toggle.Content(box_value(enabled ? L"Disable" : L"Enable"));
-                    toggle.Click([rebuild, p, enabled](IInspectable const&, RoutedEventArgs const&) {
+                    toggle.Click([weak, p, enabled](IInspectable const&, RoutedEventArgs const&) {
                         std::error_code e2;
                         std::filesystem::path target;
                         if (enabled)
@@ -708,20 +710,22 @@ namespace winrt::PretClient
                             target = std::filesystem::path{ w };
                         }
                         std::filesystem::rename(p, target, e2);
-                        if (rebuild && *rebuild)
-                            (*rebuild)();
+                        if (auto r = weak.lock())
+                            if (*r)
+                                (*r)();
                     });
                     actions.Children().Append(toggle);
 
                     Button rm{};
                     rm.Content(box_value(L"Remove"));
-                    rm.Click([rebuild, p, status](IInspectable const&, RoutedEventArgs const&) {
+                    rm.Click([weak, p, status](IInspectable const&, RoutedEventArgs const&) {
                         std::error_code e2;
                         std::filesystem::remove(p, e2);
                         if (status)
                             status.Text(hstring{ L"Removed " } + hstring{ p.filename().wstring() });
-                        if (rebuild && *rebuild)
-                            (*rebuild)();
+                        if (auto r = weak.lock())
+                            if (*r)
+                                (*r)();
                     });
                     actions.Children().Append(rm);
 

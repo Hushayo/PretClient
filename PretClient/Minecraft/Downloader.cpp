@@ -633,7 +633,8 @@ namespace winrt::PretClient::Downloader
                         hstring url = hstring{ L"https://resources.download.minecraft.net/" } +
                             hs.substr(0, 2) + L"/" + hs;
                         // The object hash is the file's SHA1, so verify it too.
-                        assetBatch.Add(url, dest, size, hash, L"asset " + hash.substr(0, 8));
+                        assetBatch.Add(url, dest, size, hash,
+                            hstring{ L"asset " } + std::wstring{ hash }.substr(0, 8));
                     }
                 }
                 wchar_t mbuf[96]{};
