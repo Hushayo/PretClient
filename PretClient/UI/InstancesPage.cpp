@@ -1,7 +1,6 @@
 #include "pch.h"
 #include "InstancesPage.h"
 #include "Theme.h"
-#include "../Minecraft/Auth.h"
 #include "../Minecraft/Downloader.h"
 #include "../Minecraft/Fabric.h"
 #include "../Minecraft/Forge.h"
@@ -1894,6 +1893,16 @@ namespace winrt::PretClient
                 {
                     card->gamelog.Text(r.tail);
                     card->gamelog.Visibility(Visibility::Visible);
+                    // Auto-scroll to the newest lines: park the caret at the
+                    // end so the TextBox's internal ScrollViewer brings the
+                    // tail into view (otherwise it sits at the top).
+                    try
+                    {
+                        card->gamelog.Select(static_cast<int32_t>(r.tail.size()), 0);
+                    }
+                    catch (...)
+                    {
+                    }
                 }
             }
         }
@@ -2090,20 +2099,9 @@ namespace winrt::PretClient
             failed(buf);
             co_return;
         }
-        // Microsoft session when linked (silent refresh), otherwise the
-        // classic offline session. Never half-launch on a stale token.
-        if (Auth::HasMicrosoft())
-        {
-            SetStatus(L"Checking Microsoft session...");
-            if (!co_await Auth::EnsureSessionAsync())
-            {
-                failed(L"Microsoft session expired. Sign in again in Settings.");
-                co_return;
-            }
-        }
-        auto sess = Auth::LaunchSession();
-        auto cmd = Launcher::BuildCommand(game, sess.username, sess.uuid,
-            sess.token, sess.userType, sess.xuid, minMem, maxMem, javaExe);
+        // Offline session: classic non-premium login.
+        auto cmd = Launcher::BuildCommand(game, username, Launcher::OfflineUuid(username),
+            L"0", L"legacy", L"", minMem, maxMem, javaExe);
         hstring err;
         if (Launcher::Start(cmd, id, err))
             SetStatus(hstring{ L"Running (pid " } + to_hstring(static_cast<std::uint32_t>(Launcher::Pid(id))) +

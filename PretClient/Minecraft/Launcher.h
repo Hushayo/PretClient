@@ -3,7 +3,7 @@
 #include <map>
 #include "Downloader.h"
 
-// Online + offline launch: offline UUID or Microsoft session, full java
+// Offline launch: offline UUID session, full java
 // command from the prepared game (modern `arguments` and legacy
 // `minecraftArguments`), plus process tracking for play / stop / restart.
 namespace winrt::PretClient::Launcher

@@ -1,7 +1,6 @@
 #include "pch.h"
 #include "SettingsPage.h"
 #include "Theme.h"
-#include "../Minecraft/Auth.h"
 #include "../Minecraft/CurseForge.h"
 #include "../Paths.h"
 #include "../Settings.h"
@@ -26,33 +25,9 @@ namespace winrt::PretClient
         head.Style(Application::Current().Resources().Lookup(box_value(L"TitleLargeTextBlockStyle")).as<Style>());
         m_inner.Children().Append(head);
 
-        m_username.Header(box_value(L"Username (offline, non-premium)"));
+        m_username.Header(box_value(L"Username"));
         m_username.MaxLength(16);
         m_inner.Children().Append(m_username);
-
-        TextBlock accHead{};
-        accHead.Text(L"Account");
-        accHead.Style(Application::Current().Resources().Lookup(box_value(L"SubtitleTextBlockStyle")).as<Style>());
-        m_inner.Children().Append(accHead);
-
-        m_account.Opacity(0.7);
-        m_account.TextWrapping(TextWrapping::Wrap);
-        m_inner.Children().Append(m_account);
-
-        StackPanel accRow{};
-        accRow.Orientation(Orientation::Horizontal);
-        accRow.Spacing(8);
-        m_signIn.Content(box_value(L"Sign in with Microsoft"));
-        m_signIn.Click([this](IInspectable const&, RoutedEventArgs const&) { SignIn(); });
-        accRow.Children().Append(m_signIn);
-        m_signOut.Content(box_value(L"Sign out"));
-        m_signOut.Click([this](IInspectable const&, RoutedEventArgs const&) {
-            Auth::SignOut();
-            Refresh();
-            SetStatus(L"Signed out. Offline mode.");
-        });
-        accRow.Children().Append(m_signOut);
-        m_inner.Children().Append(accRow);
 
         m_gameDir.Header(box_value(L"Game folder (roaming .minecraft)"));
         m_inner.Children().Append(m_gameDir);
@@ -137,9 +112,6 @@ namespace winrt::PretClient
     {
         auto s = LoadSettings();
         m_username.Text(s.username);
-        hstring acc = Auth::AccountName();
-        m_account.Text(acc.empty() ? hstring{ L"Mode: offline (" } + s.username + L"). Online servers need a Microsoft sign-in."
-                                   : hstring{ L"Mode: Microsoft (" } + acc + L"). Launches use this account.");
         m_gameDir.Text(EffectiveGameDir(s));
         m_java.Text(s.javaPath);
         m_cfKey.Text(s.curseforgeKey.empty() ? CurseForge::DefaultApiKey() : s.curseforgeKey);
@@ -156,23 +128,5 @@ namespace winrt::PretClient
     void SettingsPage::SetStatus(hstring const& line)
     {
         m_status.Text(line);
-    }
-
-    void SettingsPage::SignIn()
-    {
-        m_signIn.IsEnabled(false);
-        m_signOut.IsEnabled(false);
-        SetStatus(L"Starting Microsoft sign-in...");
-        // Empty client ID = built-in shared Minecraft app (no setup).
-        hstring id = LoadSettings().msClientId;
-        Auth::SignInAsync(id,
-            [this](hstring line) { SetStatus(line); },
-            [this](bool ok, hstring message) {
-                m_signIn.IsEnabled(true);
-                m_signOut.IsEnabled(true);
-                Refresh();
-                SetStatus(message);
-                (void)ok;
-            });
     }
 }

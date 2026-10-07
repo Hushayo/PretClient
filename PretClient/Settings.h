@@ -12,7 +12,6 @@ namespace winrt::PretClient
         hstring gameDir{}; // empty = roaming .minecraft
         hstring javaPath{};
         hstring curseforgeKey{}; // per-user CurseForge API key (Mods page tab)
-        hstring msClientId{}; // optional Azure client ID override (empty = built-in shared Minecraft app)
         int minMemMb = 512;
         int maxMemMb = 2048;
     };
