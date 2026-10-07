@@ -10,16 +10,6 @@ Blank packaged WinUI 3 desktop app in C++. `App.OnLaunched` creates and activate
 - `PretClient/MainWindow.xaml`, `MainWindow.idl`, `MainWindow.xaml.h`, `MainWindow.xaml.cpp` — window, button + text
 - `PretClient/Assets/` — placeholder logos (replace with real art)
 
-## Build requirements (your machine is missing these)
-You have Build Tools 2022 only (no `cl.exe`, no Windows SDK `Include/`). Install:
-1. Visual Studio 2022 17.8+ with workloads:
-   - Desktop development with C++
-   - Windows application development
-   - .NET Desktop Development (required by VS for WinUI even for C++)
-   - Windows SDK 10.0.26100 or 10.0.19041+
-2. Windows App SDK C++ templates / VSIX (via VS Installer) + enable Developer Mode
-3. Open `PretClient.sln`, set x64 Debug, Build. VS will prompt to create a test certificate (`PretClient_TemporaryKey.pfx`) for sideloading — accept.
-
 ## Run
 F5 in VS (packaged deploy). The window title is set in `PretClient/MainWindow.xaml.cpp:18`.
 Button handler is `MainWindow::myButton_Click` in `PretClient/MainWindow.xaml.cpp:30`.
