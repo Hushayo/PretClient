@@ -90,7 +90,9 @@ namespace winrt::PretClient
         m_root.Children().Append(m_scroll);
 
         // Live search: typing filters without needing the Search button.
-        m_query.TextChanged([this](IInspectable const&, TextBoxTextChangedEventArgs const&) {
+        // (Unnamed event-arg types: TextBoxTextChangedEventArgs is not
+        // visible in this SDK's headers, so the handler takes auto params.)
+        m_query.TextChanged([this](auto&&, auto&&) {
             if (m_syncing)
                 return;
             ScheduleSearch();
