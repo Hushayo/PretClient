@@ -6,6 +6,7 @@
 #include "../Minecraft/Http.h"
 #include <chrono>
 #include <cwctype>
+#include <winrt/Microsoft.UI.Xaml.Controls.h>
 #include <winrt/Microsoft.UI.Xaml.Media.Imaging.h>
 
 using namespace winrt;

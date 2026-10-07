@@ -13,6 +13,7 @@
 #include "../Minecraft/Versions.h"
 #include "../Settings.h"
 #include <coroutine>
+#include <winrt/Windows.UI.Text.h>
 
 using namespace winrt;
 using namespace Microsoft::UI::Xaml;
