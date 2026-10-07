@@ -3,8 +3,17 @@ name: Build WinUI 3 (C++)
 on:
   push:
     branches: [main]
+    tags:
+      - 'v*'
+      - 'release-*'
   pull_request:
   workflow_dispatch:
+    inputs:
+      build_installer:
+        description: 'Build the Inno Setup installer'
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   build:
@@ -27,17 +36,17 @@ jobs:
         shell: pwsh
 
       - name: Install Inno Setup
-        if: success()
+        if: ${{ success() && (github.ref_type == 'tag' || (github.event_name == 'workflow_dispatch' && inputs.build_installer)) }}
         run: choco install innosetup --no-progress -y
         shell: pwsh
 
       - name: Build custom setup
-        if: success()
+        if: ${{ success() && (github.ref_type == 'tag' || (github.event_name == 'workflow_dispatch' && inputs.build_installer)) }}
         run: '& "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /DMyAppVersion="0.0.1-dev+${{ github.run_number }}" installer\Setup.iss'
         shell: pwsh
 
       - name: Upload setup
-        if: success()
+        if: ${{ success() && (github.ref_type == 'tag' || (github.event_name == 'workflow_dispatch' && inputs.build_installer)) }}
         uses: actions/upload-artifact@v4
         with:
           name: PretClient-Setup
