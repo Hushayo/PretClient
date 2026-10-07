@@ -1,5 +1,1 @@
-<<<<<<< HEAD
-1.0.7
-=======
 2.0.0
->>>>>>> 92614b5 (v2: fix prepare bad_alloc (dangling gameDir/modsDir refs); launch phase off UI thread)
