@@ -87,5 +87,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$env:GITHUB_REF_NAME" "installer/Output/PretClient-Setup.exe" --title "$env:GITHUB_REF_NAME" --generate-notes
+          $tag = "$env:GITHUB_REF_NAME"
+          $asset = "installer/Output/PretClient-Setup.exe"
+          if (gh release view $tag 2>$null) {
+            Write-Host "Release $tag exists, refreshing asset"
+            gh release upload $tag $asset --clobber
+          } else {
+            gh release create $tag $asset --title $tag --generate-notes
+          }
         shell: pwsh
