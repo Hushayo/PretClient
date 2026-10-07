@@ -273,7 +273,45 @@ namespace winrt::PretClient
             initial.FontSize(20);
             initial.FontWeight(Windows::UI::Text::FontWeights::Bold());
             initial.Foreground(Theme::IconForeground());
-            icon.Child(initial);
+            // Loader logo in the tile (official Fabric mark / vanilla grass
+            // block shipped in Assets/); initial letter stays as fallback.
+            bool logoOk = false;
+            try
+            {
+                wchar_t exe[MAX_PATH]{};
+                if (GetModuleFileNameW(nullptr, exe, MAX_PATH) > 0)
+                {
+                    auto art = std::filesystem::path{ exe }.parent_path() / L"Assets" /
+                        (isFabric ? L"fabric.png" : L"vanilla.png");
+                    std::error_code ec;
+                    if (std::filesystem::exists(art, ec))
+                    {
+                        std::wstring uri{ L"file:///" };
+                        std::wstring fp{ art.wstring() };
+                        for (auto& c : fp)
+                        {
+                            if (c == L'\\')
+                                c = L'/';
+                        }
+                        uri += fp;
+                        Image logo{};
+                        logo.Width(30);
+                        logo.Height(30);
+                        logo.HorizontalAlignment(HorizontalAlignment::Center);
+                        logo.VerticalAlignment(VerticalAlignment::Center);
+                        logo.Stretch(Stretch::Uniform);
+                        logo.Source(Microsoft::UI::Xaml::Media::Imaging::BitmapImage{
+                            Windows::Foundation::Uri{ uri } });
+                        icon.Child(logo);
+                        logoOk = true;
+                    }
+                }
+            }
+            catch (...)
+            {
+            }
+            if (!logoOk)
+                icon.Child(initial);
             identity.Children().Append(icon);
 
             StackPanel nameCol{};
@@ -951,6 +989,7 @@ namespace winrt::PretClient
                     });
                     actions.Children().Append(rm);
 
+                    list.Children().Append(row);
                     rows->push_back(state);
                     if (++count >= 60)
                         break;

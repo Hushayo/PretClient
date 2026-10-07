@@ -253,9 +253,13 @@
     </PackageReference>
   </ItemGroup>
   <ItemDefinitionGroup>
-    <!-- Ship the exe icon next to the binary: the title bar picks it up at runtime. -->
+    <!-- Ship the exe icon + loader tile art next to the binary (the title
+         bar and the instance tiles pick them up at runtime; Setup.iss
+         recurses them into the installer). -->
     <PostBuildEvent>
-      <Command>copy /Y "$(ProjectDir)icon.ico" "$(OutDir)icon.ico"</Command>
+      <Command>copy /Y "$(ProjectDir)icon.ico" "$(OutDir)icon.ico"
+if not exist "$(OutDir)Assets" mkdir "$(OutDir)Assets"
+copy /Y "$(ProjectDir)Assets\*.png" "$(OutDir)Assets\"</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
