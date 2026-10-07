@@ -1,0 +1,25 @@
+PackageIdentifier: Hushayo.PretClient
+PackageVersion: 2.0.12
+InstallerType: inno
+Scope: user
+UpgradeBehavior: install
+ReleaseDate: 2026-10-07
+InstallModes:
+- silent
+- silentWithProgress
+AppsAndFeaturesEntries:
+- DisplayName: PretClient
+  Publisher: Hushayo
+  DisplayVersion: 2.0.12
+  ProductCode: '{8A81D479-8604-44BF-8C72-38FB118FFEBE}_is1'
+  UpgradeCode: '{8A81D479-8604-44BF-8C72-38FB118FFEBE}'
+Installers:
+- Architecture: x64
+  Scope: user
+  InstallerType: inno
+  InstallerUrl: https://github.com/Hushayo/PretClient/releases/download/v2.0.12/PretClient-Setup.exe
+  InstallerSha256: CE18337519379C86BC57672F18A212AC1D580E53DA4932AEB0A923D89148EF8F
+  Silent: /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-
+  SilentWithProgress: /SILENT /SUPPRESSMSGBOXES /NORESTART /SP-
+ManifestType: installer
+ManifestVersion: 1.10.0

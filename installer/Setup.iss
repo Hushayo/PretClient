@@ -8,7 +8,15 @@
 AppId={{8A81D479-8604-44BF-8C72-38FB118FFEBE}
 AppName=PretClient
 AppVersion={#MyAppVersion}
-AppPublisher=PretClient
+AppVerName=PretClient {#MyAppVersion}
+VersionInfoVersion={#MyAppVersion}
+VersionInfoCompany=Hushayo
+VersionInfoDescription=PretClient — compact Minecraft launcher
+AppPublisher=Hushayo
+AppPublisherURL=https://github.com/Hushayo/PretClient
+AppSupportURL=https://github.com/Hushayo/PretClient/issues
+AppUpdatesURL=https://github.com/Hushayo/PretClient/releases
+AppCopyright=GPL-3.0
 DefaultDirName={localappdata}\Programs\PretClient
 DefaultGroupName=PretClient
 OutputDir=Output

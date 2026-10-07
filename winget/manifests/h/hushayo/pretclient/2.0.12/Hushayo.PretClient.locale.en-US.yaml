@@ -1,0 +1,24 @@
+PackageIdentifier: Hushayo.PretClient
+PackageVersion: 2.0.12
+PackageLocale: en-US
+Publisher: Hushayo
+PublisherUrl: https://github.com/Hushayo
+PackageName: PretClient
+PackageUrl: https://github.com/Hushayo/PretClient
+License: GNU General Public License v3.0
+LicenseUrl: https://github.com/Hushayo/PretClient/blob/main/LICENSE
+ShortDescription: Compact, offline-first Minecraft launcher for Windows (Vanilla + Fabric, Modrinth mods).
+Description: |-
+  PretClient is a compact, offline-first Minecraft launcher for Windows (WinUI 3, C++).
+  Vanilla / Fabric instances with offline play, per-instance Modrinth mods, live CPU/RAM/GPU stats and game log, Java auto-detect, and one-click self-update from GitHub Releases.
+  Unpackaged exe via Inno Setup — per-user install, no MSIX, no admin.
+Moniker: pretclient
+Tags:
+- minecraft
+- launcher
+- fabric
+- modrinth
+- offline
+ReleaseNotesUrl: https://github.com/Hushayo/PretClient/releases/tag/v2.0.12
+ManifestType: defaultLocale
+ManifestVersion: 1.10.0

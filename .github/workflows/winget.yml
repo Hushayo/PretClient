@@ -1,0 +1,37 @@
+name: Publish to WinGet
+
+# After the FIRST manual winget-pkgs PR merges, this keeps WinGet in sync
+# automatically on every GitHub Release. The first version cannot be automated —
+# winget-releaser needs a base version in winget-pkgs to update from.
+#
+# One-time setup:
+#   1. Fork microsoft/winget-pkgs under the same owner (Hushayo).
+#   2. Create a classic PAT with `public_repo` + `workflow` scopes.
+#   3. Add it as repo secret WINGET_TOKEN.
+#   4. Copy winget/manifests/h/hushayo/pretclient/<version>/ into the fork at
+#      manifests/h/hushayo/pretclient/<version>/, run
+#      `winget validate --manifest` locally, open the PR, get it merged.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      release-tag:
+        description: 'Release tag to publish (e.g. v2.0.12)'
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: vedantmgoyal9/winget-releaser@main
+        with:
+          identifier: Hushayo.PretClient
+          release-tag: ${{ inputs.release-tag || github.event.release.tag_name }}
+          installers-regex: 'PretClient-Setup\.exe$'
+          max-versions-to-keep: 5
+          token: ${{ secrets.WINGET_TOKEN }}

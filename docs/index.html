@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>PretClient — Compact Minecraft Launcher</title>
-  <meta name="description" content="PretClient is a compact, offline-first Minecraft launcher for Windows (WinUI 3, C++). Vanilla + Fabric instances, Modrinth mods, live stats, one-click update." />
+  <meta name="description" content="PretClient is a compact, offline-first Minecraft launcher for Windows. Vanilla + Fabric, Modrinth mods, live stats, one-click update." />
   <link rel="stylesheet" href="./styles.css" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2316a34a'/%3E%3Crect x='7' y='7' width='18' height='6' fill='white'/%3E%3Crect x='7' y='15' width='12' height='10' fill='white' opacity='.9'/%3E%3C/svg%3E" />
 </head>
@@ -14,11 +14,12 @@
       <a class="brand" href="#top">
         <span class="logo" aria-hidden="true"></span>
         <span>PretClient</span>
-        <span class="badge" id="version-badge">v2.0.11</span>
+        <span class="badge" id="version-badge">v2.0.12</span>
       </a>
       <nav class="links">
         <a href="#features">Features</a>
         <a href="#download">Download</a>
+        <a href="#winget">Winget</a>
         <a href="#install">Install</a>
         <a href="#faq">FAQ</a>
         <a class="gh" href="https://github.com/Hushayo/PretClient" target="_blank" rel="noopener">GitHub</a>
@@ -31,127 +32,113 @@
       <div class="hero-text">
         <h1>Compact Minecraft launcher for Windows.</h1>
         <p class="sub">
-          Offline-first, unpackaged exe + Inno Setup installer.
-          No MSIX, no admin. Vanilla / Fabric instances, per-instance Modrinth mods,
-          live CPU / RAM / GPU + log, and one-click self-update.
+          Offline-first. No MSIX, no admin, no account.
+          Vanilla / Fabric instances, per-instance Modrinth mods,
+          live CPU / RAM / GPU + log, one-click self-update.
         </p>
         <div class="cta">
-          <a id="download-btn" class="btn primary" href="https://github.com/Hushayo/PretClient/releases/latest/download/PretClient-Setup.exe">Download PretClient-Setup.exe</a>
+          <a id="download-btn" class="btn primary" href="https://github.com/Hushayo/PretClient/releases/download/v2.0.12/PretClient-Setup.exe">Download for Windows x64</a>
           <a class="btn" href="https://github.com/Hushayo/PretClient/releases/latest" target="_blank" rel="noopener">All releases</a>
         </div>
         <p class="meta" id="release-meta">Windows 10/11 x64 &middot; Free &amp; open source (GPL-3.0)</p>
-        <div class="ticks">
-          <span>Offline play</span>
-          <span>Vanilla + Fabric</span>
-          <span>Modrinth built-in</span>
-          <span>Auto Java detect</span>
-        </div>
       </div>
-      <div class="hero-card" aria-hidden="true">
-        <div class="window">
-          <div class="win-bar"><i></i><i></i><i></i><span>PretClient</span></div>
-          <div class="win-body">
-            <div class="side">
-              <div class="s active"></div><div class="s"></div><div class="s"></div><div class="s"></div>
-            </div>
-            <div class="main">
-              <div class="row big"></div>
-              <div class="row grid">
-                <div></div><div></div><div></div>
-                <div></div><div></div><div></div>
-              </div>
-              <div class="row bar"></div>
-            </div>
+
+      <div class="term">
+        <div class="term-bar">
+          <span class="dots"><i></i><i></i><i></i></span>
+          <div class="tabs" role="tablist">
+            <button class="tab active" data-tab="direct" role="tab">Direct</button>
+            <button class="tab" data-tab="winget" role="tab">winget</button>
           </div>
+          <button class="copy" id="copy-btn" title="Copy">Copy</button>
         </div>
-        <pre class="snippet"><code>$ winget install PretClient
-# or: download PretClient-Setup.exe → Next → Play</code></pre>
+        <pre class="term-body" id="term-direct"><code># Option 1 — direct (works today)
+Invoke-WebRequest -OutFile PretClient-Setup.exe `
+  https://github.com/Hushayo/PretClient/releases/download/v2.0.12/PretClient-Setup.exe
+.\PretClient-Setup.exe</code></pre>
+        <pre class="term-body hidden" id="term-winget"><code># Option 2 — winget, official ID (after first winget-pkgs merge)
+winget install Hushayo.PretClient
+
+# Until then — install from this repo's manifests (works today)
+git clone https://github.com/Hushayo/PretClient.git
+winget install --manifest .\PretClient\winget\manifests\h\hushayo\pretclient\2.0.12\Hushayo.PretClient.yaml</code></pre>
       </div>
     </section>
 
     <section id="features" class="wrap section">
       <h2>Everything you need, nothing bloated.</h2>
       <div class="grid">
-        <article>
-          <h3>Instances</h3>
-          <p>Vanilla / Fabric instances with offline play, isolated game dirs, live CPU / RAM / GPU stats and game log per instance.</p>
-        </article>
-        <article>
-          <h3>Mods</h3>
-          <p>Modrinth search built in, version-locked to each instance. One-click install and update check, per-instance <code>mods/</code> folder.</p>
-        </article>
-        <article>
-          <h3>Settings</h3>
-          <p>Username profiles, custom game folder, Java auto-detect + override, min/max memory controls. Stored locally in <code>settings.json</code>.</p>
-        </article>
-        <article>
-          <h3>Self-update</h3>
-          <p>Polls GitHub Releases on launch. One click downloads <code>PretClient-Setup.exe</code>, installs silently, and reopens automatically.</p>
-        </article>
-        <article>
-          <h3>Offline-first</h3>
-          <p>Unpackaged WinUI 3 C++ exe. No MSIX, no admin, no account required. Your worlds stay in your folder.</p>
-        </article>
-        <article>
-          <h3>Open source</h3>
-          <p>GPL-3.0. CI builds on <code>windows-2022</code> — every push to <code>main</code> is verified, every tag ships a signed-style release.</p>
-        </article>
+        <article><h3>Instances</h3><p>Vanilla / Fabric, isolated folders, offline play with username profiles. Live CPU / RAM / GPU + game log per instance.</p></article>
+        <article><h3>Mods</h3><p>Modrinth search built in, version-locked per instance. One-click install, update check, per-instance <code>mods/</code>.</p></article>
+        <article><h3>Settings</h3><p>Game folder, Java auto-detect + override, min/max memory. Stored locally in <code>settings.json</code>.</p></article>
+        <article><h3>Self-update</h3><p>Polls GitHub Releases. One click downloads the new setup, installs silently, relaunches.</p></article>
+        <article><h3>Portable-minded</h3><p>Unpackaged WinUI 3 C++ exe via Inno Setup. Per-user install, no MSIX, no admin.</p></article>
+        <article><h3>Open source</h3><p>GPL-3.0. Built on <code>windows-2022</code> CI — every <code>main</code> push verified, every tag ships a release.</p></article>
       </div>
     </section>
 
     <section id="download" class="wrap section card">
       <div>
         <h2>Download</h2>
-        <p id="latest-line">Latest: <strong id="latest-version">v2.0.11</strong> — Windows x64 installer, no admin required.</p>
+        <p>Latest: <strong id="latest-version">v2.0.12</strong> · Windows x64 · per-user, no admin.</p>
         <div class="cta">
-          <a class="btn primary" href="https://github.com/Hushayo/PretClient/releases/latest/download/PretClient-Setup.exe">PretClient-Setup.exe</a>
-          <a class="btn" href="https://github.com/Hushayo/PretClient" target="_blank" rel="noopener">Source code</a>
+          <a class="btn primary" id="download-btn2" href="https://github.com/Hushayo/PretClient/releases/download/v2.0.12/PretClient-Setup.exe">PretClient-Setup.exe</a>
+          <button class="btn" id="hash-btn" type="button">Copy SHA256</button>
         </div>
-        <p class="small">If the direct download 404s (no release published yet), use <a href="https://github.com/Hushayo/PretClient/releases/latest">All releases</a> or grab the <code>PretClient-Setup</code> artifact from Actions.</p>
+        <p class="small mono" id="hash-line">SHA256: <code id="sha-value">ce18337519379c86bc57672f18a212ac1d580e53da4932aeb0a923d89148ef8f</code></p>
+        <p class="small">Verify: <code>Get-FileHash PretClient-Setup.exe -Algorithm SHA256</code></p>
       </div>
       <ul class="req">
         <li><strong>OS:</strong> Windows 10 1809+ / 11, x64</li>
-        <li><strong>Java:</strong> auto-detected (17+ for modern MC), override in Settings</li>
-        <li><strong>RAM:</strong> defaults 512 MB min / 2048 MB max, adjustable</li>
-        <li><strong>Install:</strong> per-user <code>%LocalAppData%\Programs\PretClient</code></li>
+        <li><strong>Java:</strong> auto-detected (17+ for modern MC)</li>
+        <li><strong>RAM:</strong> 512 MB min / 2048 MB max defaults</li>
+        <li><strong>Path:</strong> <code>%LocalAppData%\Programs\PretClient</code></li>
       </ul>
+    </section>
+
+    <section id="winget" class="wrap section">
+      <h2>Winget, honestly.</h2>
+      <p class="sub2">The old page claimed <code>winget install PretClient</code> — that package doesn't exist yet. Here's the real path:</p>
+      <ol class="steps">
+        <li><strong>Manifests live in this repo</strong> under <code>winget/manifests/h/hushayo/pretclient/&lt;version&gt;/</code> — version-pinned URL + SHA256, <code>InstallerType: inno</code>, <code>Scope: user</code>, silent flags <code>/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-</code>.</li>
+        <li><strong>First publish is manual.</strong> Copy that folder into a <code>microsoft/winget-pkgs</code> fork at <code>manifests/h/hushayo/pretclient/&lt;version&gt;/</code>, run <code>winget validate --manifest</code>, open the PR. Required once — winget-releaser needs a base version to update from.</li>
+        <li><strong>After merge, it's automatic.</strong> This repo's <code>winget.yml</code> watches releases and opens update PRs via <code>vedantmgoyal9/winget-releaser</code>. Needs a repo secret <code>WINGET_TOKEN</code> (classic PAT: <code>public_repo</code> + <code>workflow</code>) and a <code>winget-pkgs</code> fork under the same owner.</li>
+      </ol>
+      <div class="term mini">
+        <div class="term-bar"><span class="dots"><i></i><i></i><i></i></span><span class="term-title">winget — test locally today</span></div>
+        <pre><code>winget settings --enable LocalManifestFiles
+winget validate --manifest .\winget\manifests\h\hushayo\pretclient\2.0.12\Hushayo.PretClient.yaml
+winget install --manifest .\winget\manifests\h\hushayo\pretclient\2.0.12\Hushayo.PretClient.yaml
+
+# after the winget-pkgs PR merges:
+winget install Hushayo.PretClient
+winget upgrade Hushayo.PretClient</code></pre>
+      </div>
+      <p class="small">Why not merged yet? Nobody submitted it. The automation can't create the very first version — do step 2 once, then never again.</p>
     </section>
 
     <section id="install" class="wrap section">
       <h2>Install in 60 seconds</h2>
       <ol class="steps">
         <li><strong>Download</strong> the setup exe above.</li>
-        <li><strong>Run it</strong> — no admin, pick Start Menu / Desktop icons, click Install.</li>
-        <li><strong>Play</strong> — set a username, create a Vanilla or Fabric instance, hit Play. Add Modrinth mods per instance.</li>
+        <li><strong>Run it</strong> — no admin. Install, launch.</li>
+        <li><strong>Play</strong> — set a username, create a Vanilla or Fabric instance, hit Play.</li>
       </ol>
-      <p class="small">Updating? Just accept the in-app update prompt — it downloads the new setup, runs it silently, and relaunches. Or re-run the installer manually; settings and instances are kept.</p>
     </section>
 
     <section id="faq" class="wrap section">
       <h2>FAQ</h2>
-      <details>
-        <summary>Is it offline / premium auth?</summary>
-        <p>Offline play with username profiles. No Microsoft login — perfect for testing, modpacks, and LAN worlds.</p>
-      </details>
-      <details>
-        <summary>Where are my files?</summary>
-        <p>Settings → game folder (default under your data dir), with <code>instances/&lt;id&gt;</code> and <code>instances/&lt;id&gt;/mods</code> per instance, plus <code>settings.json</code>.</p>
-      </details>
-      <details>
-        <summary>How do updates work?</summary>
-        <p>The app polls GitHub Releases, compares against its stamped <code>VERSION</code>, and offers one-click <code>PretClient-Setup.exe</code> download + install.</p>
-      </details>
-      <details>
-        <summary>Build from source?</summary>
-        <p>Don't build locally — push to CI per <code>workflow.md</code>: <code>msbuild PretClient.sln /restore /p:Configuration=Release /p:Platform=x64</code> runs on <code>windows-2022</code>. Test builds come from Actions artifacts or Releases.</p>
-      </details>
+      <details><summary>Why did <code>winget install PretClient</code> fail?</summary><p>That ID was never published. Use <code>winget install Hushayo.PretClient</code> after the winget-pkgs PR merges — or the <code>--manifest</code> path above until then.</p></details>
+      <details><summary>Silent install flags?</summary><p><code>PretClient-Setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-</code> — same flags winget uses.</p></details>
+      <details><summary>Where are my files?</summary><p>Game folder from Settings, <code>instances/&lt;id&gt;</code> + <code>instances/&lt;id&gt;/mods</code> per instance, <code>settings.json</code> for prefs.</p></details>
+      <details><summary>How do updates work?</summary><p>In-app: polls GitHub Releases, one-click setup download + silent reinstall. Winget: <code>winget upgrade Hushayo.PretClient</code> once published.</p></details>
     </section>
   </main>
 
   <footer>
     <div class="wrap foot">
       <span>PretClient · GPL-3.0 · <a href="https://github.com/Hushayo/PretClient">Hushayo/PretClient</a></span>
-      <span class="small">Site: static GitHub Pages, no tracking.</span>
+      <span class="small">Static Pages site, no tracking.</span>
     </div>
   </footer>
 

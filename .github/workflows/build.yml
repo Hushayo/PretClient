@@ -68,7 +68,7 @@ jobs:
         if: ${{ success() && (github.ref_type == 'tag' || (github.event_name == 'workflow_dispatch' && inputs.build_installer)) }}
         run: |
           $v = "${{ steps.version.outputs.version }}"
-          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /DMyAppVersion="$v+${{ github.run_number }}" installer\Setup.iss
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /DMyAppVersion="$v" installer\Setup.iss
         shell: pwsh
 
       - name: Upload setup
