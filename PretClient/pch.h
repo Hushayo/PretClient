@@ -1,4 +1,16 @@
 #pragma once
+
+// Windows API compatibility: these names collide with WinUI types used below.
+#ifdef CreateDialog
+#undef CreateDialog
+#endif
+#ifdef CreateDialogW
+#undef CreateDialogW
+#endif
+#ifdef Polyline
+#undef Polyline
+#endif
+
 #include <windows.h>
 #include <unknwn.h>
 #include <restrictederrorinfo.h>
@@ -12,6 +24,7 @@
 #include <winrt/Windows.ApplicationModel.Activation.h>
 #include <winrt/Windows.Data.Json.h>
 #include <winrt/Windows.UI.h>
+#include <winrt/Windows.UI.Text.h>
 #include <winrt/Microsoft.UI.Xaml.h>
 #include <winrt/Microsoft.UI.Xaml.Controls.h>
 #include <winrt/Microsoft.UI.Xaml.Controls.Primitives.h>
