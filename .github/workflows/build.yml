@@ -17,6 +17,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 jobs:
   build:
@@ -95,4 +96,14 @@ jobs:
           } else {
             gh release create $tag $asset --title $tag --generate-notes
           }
+        shell: pwsh
+
+      # Releases created with GITHUB_TOKEN do not fire other workflows, so
+      # the winget publisher never triggers on its own -- kick it here.
+      # (It no-ops until the first manual winget-pkgs PR merges.)
+      - name: Trigger WinGet publish
+        if: ${{ success() && github.ref_type == 'tag' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run "Publish to WinGet" --ref main -f release-tag="$env:GITHUB_REF_NAME"
         shell: pwsh
