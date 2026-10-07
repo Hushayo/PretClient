@@ -68,8 +68,23 @@ namespace winrt::PretClient
         Grid root{};
         root.RowDefinitions().Append(RowDefinition{});
         root.RowDefinitions().Append(RowDefinition{});
+        root.RowDefinitions().Append(RowDefinition{});
         root.RowDefinitions().GetAt(0).Height(GridLengthHelper::Auto());
-        root.RowDefinitions().GetAt(1).Height(GridLengthHelper::FromValueAndType(1.0, GridUnitType::Star));
+        root.RowDefinitions().GetAt(1).Height(GridLengthHelper::Auto());
+        root.RowDefinitions().GetAt(2).Height(GridLengthHelper::FromValueAndType(1.0, GridUnitType::Star));
+
+        // Persistent update banner (hidden until a newer release is found).
+        // Toasts can be missed/dismissed; this stays visible in-window with a
+        // one-click Install button.
+        m_updateBar.IsOpen(false);
+        m_updateBar.IsClosable(true);
+        m_updateBar.Severity(InfoBarSeverity::Informational);
+        m_updateBar.Title(box_value(L"Update available"));
+        m_updateInstallButton.Content(box_value(L"Install now"));
+        m_updateInstallButton.Click([this](IInspectable const&, RoutedEventArgs const&) { InstallUpdateLatest(); });
+        m_updateBar.ActionButton(m_updateInstallButton);
+        Grid::SetRow(m_updateBar, 0);
+        root.Children().Append(m_updateBar);
 
         // Top-right round profile avatar (global, visible on every page).
         m_topBar.Padding(ThicknessHelper::FromLengths(0, 8, 16, 0));
@@ -91,7 +106,7 @@ namespace winrt::PretClient
         m_profileButton.Content(m_profileAvatar);
         m_profileButton.Click([this](IInspectable const&, RoutedEventArgs const&) { m_instances.ProfileDialog(); });
         m_topBar.Children().Append(m_profileButton);
-        Grid::SetRow(m_topBar, 0);
+        Grid::SetRow(m_topBar, 1);
         root.Children().Append(m_topBar);
 
         NavigationView nav{};
@@ -154,7 +169,7 @@ namespace winrt::PretClient
                 FadeContent(m_instances.Root());
             }
         });
-        Grid::SetRow(nav, 1);
+        Grid::SetRow(nav, 2);
         root.Children().Append(nav);
 
         // Keep the avatar initial/tooltip in sync (profile switches call
@@ -195,6 +210,34 @@ namespace winrt::PretClient
             m_profileAvatar.Text(hstring{ std::wstring(1, initial) });
             ToolTipService::SetToolTip(m_profileButton,
                 box_value(hstring{ L"Profile: " } + settings.username + L" — click to switch"));
+        }
+        catch (...)
+        {
+        }
+    }
+
+    void MainWindow::ShowUpdateBanner(hstring const& latest)
+    {
+        try
+        {
+            if (!m_updateBar)
+                return;
+            hstring current = Update::CurrentVersionTag();
+            m_updateBar.Message(box_value(hstring{ L"PretClient " } + current + L" → " + latest +
+                L" is ready. Install now, or open Settings for details."));
+            m_updateBar.IsOpen(true);
+        }
+        catch (...)
+        {
+        }
+    }
+
+    void MainWindow::HideUpdateBanner()
+    {
+        try
+        {
+            if (m_updateBar)
+                m_updateBar.IsOpen(false);
         }
         catch (...)
         {
@@ -297,10 +340,18 @@ namespace winrt::PretClient
             m_lastNotifiedTag = latest;
             m_settings.SetStatus(hstring{ L"Update " } + latest + L" available — see notification.");
             Update::Toast::ShowAvailable(current, latest);
+            ShowUpdateBanner(latest);
         }
         else if (!silent)
         {
             m_settings.SetStatus(L"PretClient " + current + L" is up to date.");
+            HideUpdateBanner();
+        }
+        else
+        {
+            // Silent poll confirming we're current clears a stale banner
+            // (e.g. after an update + restart the tag now matches).
+            HideUpdateBanner();
         }
     }
 

@@ -7,10 +7,11 @@
 #include "Update/Updater.h"
 
 // Sidebar shell: NavigationView (Instances / Mods / Local Server / Settings) + version
-// footer. Pages are built in code and swapped on selection. Self-update has
-// no in-window UI: CheckForUpdates raises a Windows toast (AppNotifications,
-// in-process buttons) on startup, on manual check, and on a 6h background
-// poll while open, and InstallUpdateLatest() runs the one-click flow.
+// footer. Pages are built in code and swapped on selection. Self-update tells
+// the user two ways: a Windows toast (AppNotifications, in-process buttons)
+// on startup, on manual check, and on a 6h background poll while open, plus a
+// persistent in-window InfoBar with an Install button. InstallUpdateLatest()
+// runs the one-click flow.
 namespace winrt::PretClient
 {
     struct MainWindow : Microsoft::UI::Xaml::WindowT<MainWindow>
@@ -34,6 +35,9 @@ namespace winrt::PretClient
         // Round profile avatar in the top-right header: initial letter,
         // tooltip shows full name, click opens the Profiles dialog.
         void RefreshProfileAvatar();
+        // Persistent in-window update notice (survives a dismissed toast).
+        void ShowUpdateBanner(hstring const& latest);
+        void HideUpdateBanner();
 
         Microsoft::UI::Xaml::Controls::Grid m_host{};
         Microsoft::UI::Xaml::Controls::Grid m_topBar{};
@@ -44,6 +48,9 @@ namespace winrt::PretClient
         Microsoft::UI::Xaml::Controls::NavigationViewItem m_navLocalServer{};
         Microsoft::UI::Xaml::Controls::NavigationViewItem m_navSettings{};
         Microsoft::UI::Dispatching::DispatcherQueueTimer m_fadeTimer{ nullptr };
+        // In-window update banner (row 0) + its Install button.
+        Microsoft::UI::Xaml::Controls::InfoBar m_updateBar{};
+        Microsoft::UI::Xaml::Controls::Button m_updateInstallButton{};
         InstancesPage m_instances{};
         ModsPage m_mods{};
         LocalServerPage m_localServer{};
