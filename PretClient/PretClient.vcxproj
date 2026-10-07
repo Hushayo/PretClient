@@ -252,6 +252,12 @@
       <Version>1.0.250325.1</Version>
     </PackageReference>
   </ItemGroup>
+  <ItemDefinitionGroup>
+    <!-- Ship the exe icon next to the binary: the title bar picks it up at runtime. -->
+    <PostBuildEvent>
+      <Command>copy /Y "$(ProjectDir)icon.ico" "$(OutDir)icon.ico"</Command>
+    </PostBuildEvent>
+  </ItemDefinitionGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets" />
 </Project>

@@ -19,6 +19,18 @@ bool IsNewerTag(winrt::hstring const& current, winrt::hstring const& latest);
 // Installer asset (.msix/.msixbundle/.exe) or the release page URL.
 winrt::hstring DownloadUrlFor(winrt::Windows::Data::Json::JsonObject const& release);
 
+// The setup exe asset with its published size + sha256 digest (from the
+// release API's per-asset `size` and `digest` fields). url is "" when the
+// release has no setup asset.
+struct ReleaseAsset
+{
+    winrt::hstring name{};
+    winrt::hstring url{};
+    unsigned long long size = 0;
+    winrt::hstring sha256{}; // lowercase hex, no "sha256:" prefix ("" when unpublished)
+};
+ReleaseAsset FindSetupAsset(winrt::Windows::Data::Json::JsonObject const& release);
+
 // True when the URL is a setup exe we can download + run ourselves
 // (as opposed to the release-page fallback, which still opens a browser).
 bool IsInstallerUrl(winrt::hstring const& url);

@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <memory>
 #include <shellapi.h>
+#include <winrt/Microsoft.UI.h>
 
 using namespace winrt;
 using namespace Microsoft::UI::Xaml;
@@ -18,43 +19,6 @@ using namespace Windows::Foundation;
 
 namespace winrt::PretClient
 {
-    namespace
-    {
-        // 160ms fade-in for tab content swaps, driven by a dispatcher timer
-        // (the Storyboard animation headers are broken in this SDK: the
-        // generated Animation.h does not compile here). Opacity-only, so it
-        // stays cheap. weak_ref breaks the timer/lambda cycle.
-        void FadeIn(UIElement const& el)
-        {
-            try
-            {
-                el.Opacity(0.0);
-                auto timer = Microsoft::UI::Dispatching::DispatcherQueue::GetForCurrentThread().CreateTimer();
-                timer.Interval(std::chrono::milliseconds{ 16 });
-                winrt::weak_ref<Microsoft::UI::Dispatching::DispatcherQueueTimer> weak{ timer };
-                auto step = std::make_shared<int>(0);
-                timer.Tick([el, weak, step](auto&&, auto&&) {
-                    try
-                    {
-                        auto t = weak.get();
-                        if (!t)
-                            return;
-                        *step += 1;
-                        el.Opacity((std::min)(1.0, *step / 10.0));
-                        if (*step >= 10)
-                            t.Stop();
-                    }
-                    catch (...)
-                    {
-                    }
-                });
-                timer.Start();
-            }
-            catch (...)
-            {
-            }
-        }
-    } // namespace
     MainWindow::MainWindow()
     {
         Title(L"PretClient");
@@ -62,6 +26,38 @@ namespace winrt::PretClient
         try
         {
             AppWindow().Resize(Windows::Graphics::SizeInt32{ 1160, 760 });
+        }
+        catch (...)
+        {
+        }
+        try
+        {
+            auto appWin = AppWindow();
+            // Black title bar + our own exe icon (icon.ico ships next to it).
+            wchar_t exe[MAX_PATH]{};
+            if (GetModuleFileNameW(nullptr, exe, MAX_PATH) > 0)
+            {
+                auto icon = std::filesystem::path{ exe }.parent_path() / L"icon.ico";
+                std::error_code ec;
+                if (std::filesystem::exists(icon, ec))
+                    appWin.SetIcon(hstring{ icon.wstring() });
+            }
+            auto black = Microsoft::UI::ColorHelper::FromArgb(255, 0, 0, 0);
+            auto white = Microsoft::UI::ColorHelper::FromArgb(255, 255, 255, 255);
+            auto hover = Microsoft::UI::ColorHelper::FromArgb(255, 48, 48, 48);
+            auto bar = appWin.TitleBar();
+            bar.BackgroundColor(black);
+            bar.ForegroundColor(white);
+            bar.InactiveBackgroundColor(black);
+            bar.InactiveForegroundColor(white);
+            bar.ButtonBackgroundColor(black);
+            bar.ButtonForegroundColor(white);
+            bar.ButtonHoverBackgroundColor(hover);
+            bar.ButtonHoverForegroundColor(white);
+            bar.ButtonPressedBackgroundColor(hover);
+            bar.ButtonPressedForegroundColor(white);
+            bar.ButtonInactiveBackgroundColor(black);
+            bar.ButtonInactiveForegroundColor(white);
         }
         catch (...)
         {
@@ -80,10 +76,16 @@ namespace winrt::PretClient
         m_banner.Background(SolidColorBrush{ Windows::UI::ColorHelper::FromArgb(38, 0x44, 0xBD, 0x32) });
         m_updateText.VerticalAlignment(VerticalAlignment::Center);
         m_updateText.TextWrapping(TextWrapping::Wrap);
+        m_updateProg.Minimum(0);
+        m_updateProg.Maximum(100);
+        m_updateProg.Width(220);
+        m_updateProg.VerticalAlignment(VerticalAlignment::Center);
+        m_updateProg.Visibility(Visibility::Collapsed);
         Button updateButton{};
         updateButton.Content(box_value(L"Download and install"));
         updateButton.Click([this, updateButton](IInspectable const&, RoutedEventArgs const&) { InstallUpdate(updateButton); });
         m_banner.Children().Append(m_updateText);
+        m_banner.Children().Append(m_updateProg);
         m_banner.Children().Append(updateButton);
         Grid::SetRow(m_banner, 0);
         root.Children().Append(m_banner);
@@ -123,19 +125,19 @@ namespace winrt::PretClient
             {
                 m_mods.RefreshInstances();
                 m_host.Children().Append(m_mods.Root());
-                FadeIn(m_mods.Root());
+                FadeContent(m_mods.Root());
             }
             else if (tag == L"settings")
             {
                 m_settings.Refresh();
                 m_host.Children().Append(m_settings.Root());
-                FadeIn(m_settings.Root());
+                FadeContent(m_settings.Root());
             }
             else
             {
                 m_instances.Refresh();
                 m_host.Children().Append(m_instances.Root());
-                FadeIn(m_instances.Root());
+                FadeContent(m_instances.Root());
             }
         });
         Grid::SetRow(nav, 1);
@@ -147,6 +149,60 @@ namespace winrt::PretClient
         CheckForUpdates();
     }
 
+    void MainWindow::FadeContent(UIElement const& el)
+    {
+        try
+        {
+            // The timer lives in a member: a timer nobody references can die
+            // mid-fade and leave the page stuck at opacity 0 (invisible).
+            // Any failure restores opacity instead of leaving a blank page.
+            el.Opacity(0.0);
+            m_fadeTimer = Microsoft::UI::Dispatching::DispatcherQueue::GetForCurrentThread().CreateTimer();
+            m_fadeTimer.Interval(std::chrono::milliseconds{ 16 });
+            auto step = std::make_shared<int>(0);
+            m_fadeTimer.Tick([this, el, step](auto&&, auto&&) {
+                try
+                {
+                    *step += 1;
+                    el.Opacity((std::min)(1.0, *step / 10.0));
+                    if (*step >= 10)
+                        m_fadeTimer.Stop();
+                }
+                catch (...)
+                {
+                    try
+                    {
+                        el.Opacity(1.0);
+                    }
+                    catch (...)
+                    {
+                    }
+                }
+            });
+            m_fadeTimer.Start();
+        }
+        catch (...)
+        {
+            try
+            {
+                el.Opacity(1.0);
+            }
+            catch (...)
+            {
+            }
+        }
+    }
+
+    namespace
+    {
+        hstring MbText(unsigned long long b)
+        {
+            wchar_t buf[32]{};
+            swprintf_s(buf, L"%.1f MB", b / 1048576.0);
+            return hstring{ buf };
+        }
+    } // namespace
+
     fire_and_forget MainWindow::CheckForUpdates()
     {
         JsonObject release = co_await Update::GetLatestReleaseAsync();
@@ -156,7 +212,11 @@ namespace winrt::PretClient
         hstring current = Update::CurrentVersionTag();
         if (!latest.empty() && Update::IsNewerTag(current, latest))
         {
-            m_updateUrl = Update::DownloadUrlFor(release);
+            auto asset = Update::FindSetupAsset(release);
+            if (!asset.url.empty())
+                m_updateAsset = asset;
+            else
+                m_updateUrl = Update::DownloadUrlFor(release);
             m_updateText.Text(L"Update available: " + current + L" -> " + latest);
             m_banner.Visibility(Visibility::Visible);
         }
@@ -164,40 +224,86 @@ namespace winrt::PretClient
 
     fire_and_forget MainWindow::InstallUpdate(Button button)
     {
-        if (m_updateUrl.empty())
-            co_return;
-        if (!Update::IsInstallerUrl(m_updateUrl))
+        if (m_updateAsset.url.empty())
         {
-            Update::OpenUrl(m_updateUrl); // release-page fallback: no direct asset
+            Update::OpenUrl(m_updateUrl); // no setup asset: release-page fallback
             co_return;
         }
+        if (!Update::IsInstallerUrl(m_updateAsset.url))
+        {
+            Update::OpenUrl(m_updateAsset.url);
+            co_return;
+        }
+        auto failUpdate = [this, button](hstring const& msg) {
+            m_updateText.Text(msg);
+            m_updateProg.Visibility(Visibility::Collapsed);
+            button.IsEnabled(true);
+        };
         button.IsEnabled(false);
-        m_updateText.Text(L"Downloading update...");
+        m_updateProg.Value(0);
+        m_updateProg.IsIndeterminate(true);
+        m_updateProg.Visibility(Visibility::Visible);
+        m_updateText.Text(L"Pending...");
         auto dest = std::filesystem::temp_directory_path() / L"PretClient-Setup.exe";
-        hstring err = co_await Http::DownloadToFileAsync(m_updateUrl, dest, L"PretClient/1.0",
+        hstring err = co_await Http::DownloadToFileAsync(m_updateAsset.url, dest, L"PretClient/1.0",
             [this](unsigned long long done, unsigned long long total, double) {
-                if (total == 0)
-                    return;
-                wchar_t buf[128]{};
-                swprintf_s(buf, L"Downloading update... %llu%%", done * 100 / total);
-                m_updateText.Text(buf);
+                wchar_t buf[192]{};
+                if (total > 0)
+                {
+                    double pct = 100.0 * static_cast<double>(done) / static_cast<double>(total);
+                    swprintf_s(buf, L"Downloading update... %.0f%% (%s / %s)", pct,
+                        MbText(done).c_str(), MbText(total).c_str());
+                    m_updateText.Text(buf);
+                    m_updateProg.IsIndeterminate(false);
+                    m_updateProg.Value(pct);
+                }
+                else
+                {
+                    swprintf_s(buf, L"Downloading update... %s", MbText(done).c_str());
+                    m_updateText.Text(buf);
+                }
             });
         if (!err.empty())
         {
-            m_updateText.Text(hstring{ L"Update download failed: " } + err);
-            button.IsEnabled(true);
+            failUpdate(hstring{ L"Update download failed: " } + err);
             co_return;
+        }
+        // Size check against the published asset size.
+        if (m_updateAsset.size > 0)
+        {
+            std::error_code ec;
+            auto have = std::filesystem::file_size(dest, ec);
+            if (ec || have != m_updateAsset.size)
+            {
+                std::filesystem::remove(dest, ec);
+                failUpdate(L"Update failed: size mismatch, please retry.");
+                co_return;
+            }
+        }
+        // Hash check against the release's published sha256 digest.
+        if (!m_updateAsset.sha256.empty())
+        {
+            m_updateText.Text(L"Checking hash...");
+            std::wstring hex;
+            if (!Http::Sha256OfFile(dest, hex) ||
+                _wcsicmp(hex.c_str(), std::wstring{ m_updateAsset.sha256 }.c_str()) != 0)
+            {
+                std::error_code ec;
+                std::filesystem::remove(dest, ec);
+                failUpdate(L"Update failed: hash mismatch, please retry.");
+                co_return;
+            }
         }
         // Per-user install (no UAC): run it silent, let it replace us, exit
         // now so no files are locked. The installer's postinstall entry
         // relaunches the app when done.
+        m_updateProg.Visibility(Visibility::Collapsed);
         m_updateText.Text(L"Installing update... the app will close and reopen.");
         auto rc = ShellExecuteW(nullptr, L"open", dest.c_str(),
             L"/SILENT /CLOSEAPPLICATIONS", nullptr, SW_SHOWNORMAL);
         if (reinterpret_cast<INT_PTR>(rc) <= 32)
         {
-            m_updateText.Text(L"Could not start installer.");
-            button.IsEnabled(true);
+            failUpdate(L"Could not start installer.");
             co_return;
         }
         Application::Current().Exit();

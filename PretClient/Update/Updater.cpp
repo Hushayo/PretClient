@@ -145,6 +145,63 @@ hstring DownloadUrlFor(JsonObject const& release)
     return fallback;
 }
 
+ReleaseAsset FindSetupAsset(JsonObject const& release)
+{
+    ReleaseAsset out{};
+    try
+    {
+        if (!release.HasKey(L"assets"))
+            return out;
+        for (auto const& item : release.GetNamedArray(L"assets"))
+        {
+            auto asset = item.GetObject();
+            auto name = asset.GetNamedString(L"name", L"");
+            auto url = asset.GetNamedString(L"browser_download_url", L"");
+            if (url.empty() || !out.url.empty())
+                continue;
+            std::wstring lower{ name };
+            for (auto& c : lower)
+                c = static_cast<wchar_t>(towlower(c));
+            bool isSetup = lower.find(L"setup") != std::wstring::npos &&
+                lower.size() >= 4 && lower.compare(lower.size() - 4, 4, L".exe") == 0;
+            if (!isSetup)
+                continue;
+            out.name = name;
+            out.url = url;
+            try
+            {
+                if (asset.HasKey(L"size"))
+                    out.size = static_cast<unsigned long long>(asset.GetNamedNumber(L"size"));
+            }
+            catch (...)
+            {
+            }
+            try
+            {
+                // API form is "sha256:<hex>"; keep just the hex, lowercased.
+                std::wstring d{ asset.GetNamedString(L"digest", L"") };
+                auto colon = d.find(L':');
+                if (colon != std::wstring::npos)
+                {
+                    if (d.substr(0, colon) != L"sha256")
+                        continue;
+                    d = d.substr(colon + 1);
+                }
+                for (auto& c : d)
+                    c = static_cast<wchar_t>(towlower(c));
+                out.sha256 = hstring{ d };
+            }
+            catch (...)
+            {
+            }
+        }
+    }
+    catch (...)
+    {
+    }
+    return out;
+}
+
 void OpenUrl(hstring const& url)
 {
     if (!url.empty())

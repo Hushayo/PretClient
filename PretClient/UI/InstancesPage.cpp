@@ -156,6 +156,15 @@ namespace winrt::PretClient
 
     void InstancesPage::Refresh()
     {
+        // Safety net: a failed content fade must never leave the page
+        // transparent (opacity is set to 0 only right before a fade starts).
+        try
+        {
+            m_root.Opacity(1.0);
+        }
+        catch (...)
+        {
+        }
         auto settings = LoadSettings();
         m_profile.Content(box_value(hstring{ L"Profile: " } + settings.username));
 

@@ -74,18 +74,20 @@ namespace winrt::PretClient::Http
         return Windows::Foundation::Uri::EscapeComponent(s);
     }
 
-    // Lowercase hex SHA1 of a file. Returns false on any IO/crypto failure.
-    inline bool Sha1OfFile(std::filesystem::path const& path, std::wstring& outHex)
+    // Lowercase hex digest of a file with a CNG hash algorithm
+    // (BCRYPT_SHA1_ALGORITHM / BCRYPT_SHA256_ALGORITHM). False on IO/crypto failure.
+    inline bool HashFile(std::filesystem::path const& path, wchar_t const* algorithm,
+        size_t digestLen, std::wstring& outHex)
     {
         outHex.clear();
         BCRYPT_ALG_HANDLE alg = nullptr;
         BCRYPT_HASH_HANDLE hash = nullptr;
-        std::vector<std::uint8_t> digest(20);
+        std::vector<std::uint8_t> digest(digestLen);
         std::ifstream f(path, std::ios::binary);
         if (!f.good())
             return false;
         bool ok = false;
-        if (BCryptOpenAlgorithmProvider(&alg, BCRYPT_SHA1_ALGORITHM, nullptr, 0) != 0)
+        if (BCryptOpenAlgorithmProvider(&alg, algorithm, nullptr, 0) != 0)
             return false;
         DWORD objLen = 0;
         DWORD read = 0;
@@ -116,9 +118,13 @@ namespace winrt::PretClient::Http
         }
         if (readOk && BCryptFinishHash(hash, digest.data(), static_cast<ULONG>(digest.size()), 0) == 0)
         {
-            wchar_t hex[41]{};
+            std::wstring hex;
+            wchar_t pair[3]{};
             for (size_t i = 0; i < digest.size(); ++i)
-                swprintf_s(hex + i * 2, 3, L"%02x", digest[i]);
+            {
+                swprintf_s(pair, L"%02x", digest[i]);
+                hex += pair;
+            }
             outHex = hex;
             ok = true;
         }
@@ -127,6 +133,18 @@ namespace winrt::PretClient::Http
         if (alg)
             BCryptCloseAlgorithmProvider(alg, 0);
         return ok;
+    }
+
+    // Lowercase hex SHA1 of a file. Returns false on any IO/crypto failure.
+    inline bool Sha1OfFile(std::filesystem::path const& path, std::wstring& outHex)
+    {
+        return HashFile(path, BCRYPT_SHA1_ALGORITHM, 20, outHex);
+    }
+
+    // Lowercase hex SHA256 of a file. Returns false on any IO/crypto failure.
+    inline bool Sha256OfFile(std::filesystem::path const& path, std::wstring& outHex)
+    {
+        return HashFile(path, BCRYPT_SHA256_ALGORITHM, 32, outHex);
     }
 
     using ProgFn = std::function<void(unsigned long long done, unsigned long long total, double bytesPerSec)>;
