@@ -41,6 +41,9 @@
     <ClInclude Include="Minecraft\Downloader.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="Minecraft\CurseForge.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="Minecraft\Fabric.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -71,6 +74,9 @@
     <ClInclude Include="Minecraft\Rules.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="Minecraft\Server.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="Minecraft\Versions.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -78,6 +84,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="UI\InstancesPage.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="UI\LocalServerPage.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="UI\ModsPage.h">
@@ -112,6 +121,9 @@
     <ClCompile Include="Minecraft\Downloader.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="Minecraft\CurseForge.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="Minecraft\Fabric.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -136,6 +148,9 @@
     <ClCompile Include="Minecraft\Quilt.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="Minecraft\Server.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="Minecraft\Versions.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -143,6 +158,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="UI\InstancesPage.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="UI\LocalServerPage.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="UI\ModsPage.cpp">

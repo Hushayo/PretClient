@@ -123,9 +123,6 @@ namespace winrt::PretClient
         add.Content(box_value(L"+ New instance"));
         add.Click([this](IInspectable const&, RoutedEventArgs const&) { AddDialog(); });
         topRow.Children().Append(add);
-
-        m_profile.Click([this](IInspectable const&, RoutedEventArgs const&) { ProfileDialog(); });
-        topRow.Children().Append(m_profile);
         m_root.Children().Append(topRow);
 
         m_status.Opacity(0.7);
@@ -170,8 +167,18 @@ namespace winrt::PretClient
         catch (...)
         {
         }
-        auto settings = LoadSettings();
-        m_profile.Content(box_value(hstring{ L"Profile: " } + settings.username));
+        // Profile avatar lives in the MainWindow top-right header now. Nudge
+        // it whenever the page refreshes (profile switch included).
+        if (m_onProfileChanged)
+        {
+            try
+            {
+                m_onProfileChanged();
+            }
+            catch (...)
+            {
+            }
+        }
 
         m_cards.Children().Clear();
         m_cardList.clear();
@@ -309,8 +316,11 @@ namespace winrt::PretClient
                         }
                         uri += fp;
                         Image logo{};
-                        logo.Width(30);
-                        logo.Height(30);
+                        // Vanilla ships our own grass-block cube art: give it
+                        // more presence than the small per-loader marks.
+                        double logoSize = isModded ? 30.0 : 40.0;
+                        logo.Width(logoSize);
+                        logo.Height(logoSize);
                         logo.HorizontalAlignment(HorizontalAlignment::Center);
                         logo.VerticalAlignment(VerticalAlignment::Center);
                         logo.Stretch(Stretch::Uniform);
@@ -1727,8 +1737,84 @@ namespace winrt::PretClient
         loaderBox.Items().Append(box_value(L"neoforge"));
         loaderBox.SelectedIndex(0);
 
-        TextBox loaderVerBox{};
-        loaderVerBox.Header(box_value(L"Loader version (empty = latest)"));
+        ComboBox loaderVerBox{};
+        loaderVerBox.Header(box_value(L"Loader build"));
+        loaderVerBox.Items().Append(box_value(L"latest (auto)"));
+        loaderVerBox.SelectedIndex(0);
+        loaderVerBox.IsEnabled(false); // vanilla default: no build to pick
+
+        // Loader builds are fetched per (loader, mcVersion) via the
+        // Fabric/Quilt/Forge/NeoForge modules (GetLoaderVersions). A
+        // generation counter drops stale callbacks when the user flips
+        // loader/version quickly.
+        auto buildGen = std::make_shared<int>(0);
+        auto refreshLoaderBuilds = std::make_shared<std::function<void()>>();
+        *refreshLoaderBuilds = [this, loaderBox, versionBox, loaderVerBox, buildGen]() {
+            hstring loader = unbox_value_or<hstring>(loaderBox.SelectedItem(), L"vanilla");
+            hstring mc = unbox_value_or<hstring>(versionBox.SelectedItem(), L"");
+            if (loader == L"vanilla" || mc.empty())
+            {
+                loaderVerBox.Items().Clear();
+                loaderVerBox.Items().Append(box_value(L"latest (auto)"));
+                loaderVerBox.SelectedIndex(0);
+                loaderVerBox.IsEnabled(false);
+                return;
+            }
+            int gen = ++(*buildGen);
+            loaderVerBox.Items().Clear();
+            loaderVerBox.Items().Append(box_value(L"loading..."));
+            loaderVerBox.SelectedIndex(0);
+            loaderVerBox.IsEnabled(false);
+            auto fill = [this, loaderVerBox, buildGen, gen](std::vector<hstring> builds) {
+                try
+                {
+                    if (*buildGen != gen)
+                        return; // stale request
+                    loaderVerBox.Items().Clear();
+                    loaderVerBox.Items().Append(box_value(L"latest (auto)"));
+                    for (auto const& b : builds)
+                        loaderVerBox.Items().Append(box_value(b));
+                    if (builds.empty())
+                        SetStatus(L"No loader builds found (latest will be used).");
+                    loaderVerBox.SelectedIndex(0);
+                    loaderVerBox.IsEnabled(true);
+                }
+                catch (...)
+                {
+                }
+            };
+            try
+            {
+                if (loader == L"fabric")
+                    Fabric::GetLoaderVersions(mc, std::move(fill));
+                else if (loader == L"quilt")
+                    Quilt::GetLoaderVersions(mc, std::move(fill));
+                else if (loader == L"forge")
+                    Forge::GetLoaderVersions(mc, std::move(fill));
+                else if (loader == L"neoforge")
+                    NeoForge::GetLoaderVersions(mc, std::move(fill));
+                else
+                    fill({});
+            }
+            catch (...)
+            {
+                fill({});
+            }
+        };
+        loaderBox.SelectionChanged(
+            [refreshLoaderBuilds](IInspectable const&, SelectionChangedEventArgs const&) {
+                if (*refreshLoaderBuilds)
+                    (*refreshLoaderBuilds)();
+            });
+        // MC version changes also invalidate the build list; wired after the
+        // manifest fills versionBox (see below) to avoid double-fetch here.
+        auto hookVersionChanges = [versionBox, refreshLoaderBuilds]() {
+            versionBox.SelectionChanged(
+                [refreshLoaderBuilds](IInspectable const&, SelectionChangedEventArgs const&) {
+                    if (*refreshLoaderBuilds)
+                        (*refreshLoaderBuilds)();
+                });
+        };
 
         StackPanel panel{};
         panel.Spacing(8);
@@ -1747,9 +1833,10 @@ namespace winrt::PretClient
         dialog.XamlRoot(m_root.XamlRoot());
 
         Versions::FetchManifestAsync(
-            [this, typeBox, versionBox, loaderBox, loaderVerBox, nameBox, dialog](
+            [this, typeBox, versionBox, loaderBox, loaderVerBox, nameBox, dialog,
+                refreshLoaderBuilds, hookVersionChanges](
                 Versions::Manifest m) mutable {
-                auto fillVersions = [versionBox, typeBox, m]() mutable {
+                auto fillVersions = [versionBox, typeBox, m, refreshLoaderBuilds]() mutable {
                     versionBox.Items().Clear();
                     hstring type = unbox_value_or<hstring>(typeBox.SelectedItem(), L"release");
                     int added = 0;
@@ -1775,6 +1862,9 @@ namespace winrt::PretClient
                         fillVersions();
                     });
                 fillVersions();
+                hookVersionChanges();
+                if (*refreshLoaderBuilds)
+                    (*refreshLoaderBuilds)();
                 SetStatus(L"");
                 ShowCreateDialog(dialog, nameBox, versionBox, loaderBox, loaderVerBox);
             });
@@ -1782,7 +1872,7 @@ namespace winrt::PretClient
 
     fire_and_forget InstancesPage::ShowCreateDialog(
         ContentDialog dialog, TextBox nameBox, ComboBox versionBox,
-        ComboBox loaderBox, TextBox loaderVerBox)
+        ComboBox loaderBox, ComboBox loaderVerBox)
     {
         if (co_await dialog.ShowAsync() != ContentDialogResult::Primary)
             co_return;
@@ -1791,7 +1881,12 @@ namespace winrt::PretClient
         in.name = nameBox.Text().empty() ? hstring{ L"Instance" } : hstring{ nameBox.Text() };
         in.mcVersion = unbox_value_or<hstring>(versionBox.SelectedItem(), L"1.21.4");
         in.loader = unbox_value_or<hstring>(loaderBox.SelectedItem(), L"vanilla");
-        in.loaderVersion = loaderVerBox.Text();
+        hstring picked = unbox_value_or<hstring>(loaderVerBox.SelectedItem(), L"latest (auto)");
+        if (in.loader == L"vanilla" || picked == L"latest (auto)" ||
+            picked == L"loading..." || picked.empty())
+            in.loaderVersion = L""; // empty = resolve latest at launch
+        else
+            in.loaderVersion = picked;
         auto all = LoadInstances();
         all.push_back(std::move(in));
         SaveInstances(all);

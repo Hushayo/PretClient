@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "MainWindow.h"
+#include "Settings.h"
 #include "UI/Theme.h"
 #include "Minecraft/Http.h"
 #include "Update/Updater.h"
@@ -66,8 +67,33 @@ namespace winrt::PretClient
         Grid root{};
         root.RowDefinitions().Append(RowDefinition{});
         root.RowDefinitions().Append(RowDefinition{});
+        root.RowDefinitions().Append(RowDefinition{});
         root.RowDefinitions().GetAt(0).Height(GridLengthHelper::Auto());
-        root.RowDefinitions().GetAt(1).Height(GridLengthHelper::FromValueAndType(1.0, GridUnitType::Star));
+        root.RowDefinitions().GetAt(1).Height(GridLengthHelper::Auto());
+        root.RowDefinitions().GetAt(2).Height(GridLengthHelper::FromValueAndType(1.0, GridUnitType::Star));
+
+        // Top-right round profile avatar (global, visible on every page).
+        m_topBar.Padding(ThicknessHelper::FromLengths(0, 8, 16, 0));
+        m_profileButton.Width(36);
+        m_profileButton.Height(36);
+        m_profileButton.Padding(ThicknessHelper::FromUniformLength(0));
+        m_profileButton.CornerRadius(CornerRadiusHelper::FromUniformRadius(18));
+        m_profileButton.Background(SolidColorBrush{ Theme::AccentBase() });
+        m_profileButton.BorderBrush(Theme::CardStroke());
+        m_profileButton.HorizontalAlignment(HorizontalAlignment::Right);
+        m_profileButton.VerticalAlignment(VerticalAlignment::Center);
+        m_profileButton.HorizontalContentAlignment(HorizontalAlignment::Center);
+        m_profileButton.VerticalContentAlignment(VerticalAlignment::Center);
+        m_profileAvatar.HorizontalAlignment(HorizontalAlignment::Center);
+        m_profileAvatar.VerticalAlignment(VerticalAlignment::Center);
+        m_profileAvatar.FontSize(16);
+        m_profileAvatar.FontWeight(Windows::UI::Text::FontWeights::Bold());
+        m_profileAvatar.Foreground(SolidColorBrush{ Windows::UI::ColorHelper::FromArgb(255, 255, 255, 255) });
+        m_profileButton.Content(m_profileAvatar);
+        m_profileButton.Click([this](IInspectable const&, RoutedEventArgs const&) { m_instances.ProfileDialog(); });
+        m_topBar.Children().Append(m_profileButton);
+        Grid::SetRow(m_topBar, 0);
+        root.Children().Append(m_topBar);
 
         m_banner.Orientation(Orientation::Horizontal);
         m_banner.Spacing(12);
@@ -87,7 +113,7 @@ namespace winrt::PretClient
         m_banner.Children().Append(m_updateText);
         m_banner.Children().Append(m_updateProg);
         m_banner.Children().Append(updateButton);
-        Grid::SetRow(m_banner, 0);
+        Grid::SetRow(m_banner, 1);
         root.Children().Append(m_banner);
 
         NavigationView nav{};
@@ -101,11 +127,15 @@ namespace winrt::PretClient
         m_navMods.Content(box_value(L"Mods"));
         m_navMods.Icon(SymbolIcon(Symbol::Download));
         m_navMods.Tag(box_value(L"mods"));
+        m_navLocalServer.Content(box_value(L"Local Server"));
+        m_navLocalServer.Icon(SymbolIcon(Symbol::Globe));
+        m_navLocalServer.Tag(box_value(L"localserver"));
         m_navSettings.Content(box_value(L"Settings"));
         m_navSettings.Icon(SymbolIcon(Symbol::Setting));
         m_navSettings.Tag(box_value(L"settings"));
         nav.MenuItems().Append(m_navInstances);
         nav.MenuItems().Append(m_navMods);
+        nav.MenuItems().Append(m_navLocalServer);
         nav.MenuItems().Append(m_navSettings);
 
         nav.PaneTitle(L"PretClient");
@@ -127,6 +157,12 @@ namespace winrt::PretClient
                 m_host.Children().Append(m_mods.Root());
                 FadeContent(m_mods.Root());
             }
+            else if (tag == L"localserver")
+            {
+                m_localServer.Refresh();
+                m_host.Children().Append(m_localServer.Root());
+                FadeContent(m_localServer.Root());
+            }
             else if (tag == L"settings")
             {
                 m_settings.Refresh();
@@ -140,14 +176,37 @@ namespace winrt::PretClient
                 FadeContent(m_instances.Root());
             }
         });
-        Grid::SetRow(nav, 1);
+        Grid::SetRow(nav, 2);
         root.Children().Append(nav);
+
+        // Keep the avatar initial/tooltip in sync (profile switches call
+        // InstancesPage::Refresh, which nudges us via this callback).
+        m_instances.SetOnProfileChanged([this]() { RefreshProfileAvatar(); });
+        RefreshProfileAvatar();
 
         Content(root);
         nav.SelectedItem(m_navInstances);
 
         m_settings.OnCheckUpdates([this] { CheckForUpdates(); });
         CheckForUpdates();
+    }
+
+    void MainWindow::RefreshProfileAvatar()
+    {
+        try
+        {
+            auto settings = LoadSettings();
+            std::wstring name{ settings.username };
+            wchar_t initial = L'?';
+            if (!name.empty())
+                initial = static_cast<wchar_t>(towupper(name[0]));
+            m_profileAvatar.Text(hstring{ std::wstring(1, initial) });
+            ToolTipService::SetToolTip(m_profileButton,
+                box_value(hstring{ L"Profile: " } + settings.username + L" — click to switch"));
+        }
+        catch (...)
+        {
+        }
     }
 
     void MainWindow::FadeContent(UIElement const& el)

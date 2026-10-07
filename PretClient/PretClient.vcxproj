@@ -202,6 +202,7 @@
     <ClInclude Include="Settings.h" />
     <ClInclude Include="pch.h" />
     <ClInclude Include="Minecraft\Downloader.h" />
+    <ClInclude Include="Minecraft\CurseForge.h" />
     <ClInclude Include="Minecraft\Fabric.h" />
     <ClInclude Include="Minecraft\Forge.h" />
     <ClInclude Include="Minecraft\Http.h" />
@@ -212,9 +213,11 @@
     <ClInclude Include="Minecraft\NeoForge.h" />
     <ClInclude Include="Minecraft\Quilt.h" />
     <ClInclude Include="Minecraft\Rules.h" />
+    <ClInclude Include="Minecraft\Server.h" />
     <ClInclude Include="Minecraft\Versions.h" />
     <ClInclude Include="System\Stats.h" />
     <ClInclude Include="UI\InstancesPage.h" />
+    <ClInclude Include="UI\LocalServerPage.h" />
     <ClInclude Include="UI\ModsPage.h" />
     <ClInclude Include="UI\SettingsPage.h" />
     <ClInclude Include="UI\Theme.h" />
@@ -226,6 +229,7 @@
     <ClCompile Include="Settings.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="Minecraft\Downloader.cpp" />
+    <ClCompile Include="Minecraft\CurseForge.cpp" />
     <ClCompile Include="Minecraft\Fabric.cpp" />
     <ClCompile Include="Minecraft\Forge.cpp" />
     <ClCompile Include="Minecraft\Instance.cpp" />
@@ -234,9 +238,11 @@
     <ClCompile Include="Minecraft\Modrinth.cpp" />
     <ClCompile Include="Minecraft\NeoForge.cpp" />
     <ClCompile Include="Minecraft\Quilt.cpp" />
+    <ClCompile Include="Minecraft\Server.cpp" />
     <ClCompile Include="Minecraft\Versions.cpp" />
     <ClCompile Include="System\Stats.cpp" />
     <ClCompile Include="UI\InstancesPage.cpp" />
+    <ClCompile Include="UI\LocalServerPage.cpp" />
     <ClCompile Include="UI\ModsPage.cpp" />
     <ClCompile Include="UI\SettingsPage.cpp" />
     <ClCompile Include="Update\Updater.cpp" />

@@ -53,6 +53,65 @@ namespace winrt::PretClient::Http
         co_return co_await resp.Content().ReadAsStringAsync();
     }
 
+    // GET with an Authorization header (Minecraft profile/entitlements).
+    // Throws hresult_error("HTTP <status> <body>") so callers can map errors.
+    inline Windows::Foundation::IAsyncOperation<hstring> GetStringAuthAsync(
+        hstring url, hstring userAgent, hstring authHeader)
+    {
+        try
+        {
+            Windows::Web::Http::HttpRequestMessage msg(
+                Windows::Web::Http::HttpMethod::Get(), Windows::Foundation::Uri{ url });
+            msg.Headers().Append(L"Authorization", authHeader);
+            auto resp = co_await ClientFor(userAgent).SendRequestAsync(msg);
+            hstring body = co_await resp.Content().ReadAsStringAsync();
+            if (!resp.IsSuccessStatusCode())
+            {
+                wchar_t code[32]{};
+                swprintf_s(code, L"HTTP %d ", static_cast<int>(resp.StatusCode()));
+                throw hresult_error(E_FAIL, hstring{ code } + body);
+            }
+            co_return body;
+        }
+        catch (hresult_error const&)
+        {
+            throw;
+        }
+        catch (...)
+        {
+            throw hresult_error(E_FAIL, L"Request failed.");
+        }
+    }
+
+    // POST a UTF-8 body (JSON or form-encoded) and return the response text.
+    // Throws hresult_error("HTTP <status> <body>") so callers can map errors.
+    inline Windows::Foundation::IAsyncOperation<hstring> PostStringAsync(
+        hstring url, std::string const& utf8Body, hstring contentType, hstring userAgent)
+    {
+        try
+        {
+            Windows::Web::Http::HttpStringContent content(to_hstring(utf8Body),
+                Windows::Storage::Streams::UnicodeEncoding::Utf8, contentType);
+            auto resp = co_await ClientFor(userAgent).PostAsync(Windows::Foundation::Uri{ url }, content);
+            hstring body = co_await resp.Content().ReadAsStringAsync();
+            if (!resp.IsSuccessStatusCode())
+            {
+                wchar_t code[32]{};
+                swprintf_s(code, L"HTTP %d ", static_cast<int>(resp.StatusCode()));
+                throw hresult_error(E_FAIL, hstring{ code } + body);
+            }
+            co_return body;
+        }
+        catch (hresult_error const&)
+        {
+            throw;
+        }
+        catch (...)
+        {
+            throw hresult_error(E_FAIL, L"Request failed.");
+        }
+    }
+
     inline Windows::Foundation::IAsyncOperation<Windows::Storage::Streams::IBuffer> GetBufferAsync(
         hstring url, hstring userAgent)
     {

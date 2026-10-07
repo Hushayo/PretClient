@@ -26,6 +26,21 @@ namespace winrt::PretClient
         head.Text(L"Mods - Modrinth");
         head.Style(Application::Current().Resources().Lookup(box_value(L"TitleLargeTextBlockStyle")).as<Style>());
         m_root.Children().Append(head);
+        m_head = head;
+
+        // Source tabs (Modrinth | CurseForge): the active tab reads as the
+        // accent button, the other as a plain button.
+        StackPanel tabs{};
+        tabs.Orientation(Orientation::Horizontal);
+        tabs.Spacing(8);
+        m_tabModrinth.Content(box_value(L"Modrinth"));
+        m_tabCurse.Content(box_value(L"CurseForge"));
+        m_tabModrinth.Click([this](IInspectable const&, RoutedEventArgs const&) { SetSource(Source::Modrinth); });
+        m_tabCurse.Click([this](IInspectable const&, RoutedEventArgs const&) { SetSource(Source::CurseForge); });
+        tabs.Children().Append(m_tabModrinth);
+        tabs.Children().Append(m_tabCurse);
+        m_root.Children().Append(tabs);
+        PaintSourceTabs();
 
         StackPanel row{};
         row.Orientation(Orientation::Horizontal);
@@ -278,12 +293,153 @@ namespace winrt::PretClient
         co_return;
     }
 
+    void ModsPage::SetSource(Source s)
+    {
+        if (m_source == s)
+            return;
+        m_source = s;
+        PaintSourceTabs();
+        OnSearch();
+    }
+
+    void ModsPage::PaintSourceTabs()
+    {
+        try
+        {
+            auto accent = Application::Current().Resources().Lookup(box_value(L"AccentButtonStyle")).as<Style>();
+            bool cf = (m_source == Source::CurseForge);
+            m_head.Text(cf ? L"Mods - CurseForge" : L"Mods - Modrinth");
+            m_tabModrinth.Style(cf ? Style{ nullptr } : accent);
+            m_tabCurse.Style(cf ? accent : Style{ nullptr });
+        }
+        catch (...)
+        {
+        }
+    }
+
+    void ModsPage::AddResultCard(hstring title, hstring desc, hstring meta, hstring iconUrl,
+        std::function<void()> onInstall, std::function<void()> onBuilds)
+    {
+        Border card{};
+        card.Background(Theme::CardBrush());
+        card.BorderBrush(Theme::CardStroke());
+        card.BorderThickness(ThicknessHelper::FromUniformLength(1));
+        card.CornerRadius(CornerRadiusHelper::FromUniformRadius(8));
+        card.Padding(ThicknessHelper::FromUniformLength(12));
+
+        Grid grid{};
+        grid.ColumnSpacing(12);
+        grid.ColumnDefinitions().Append(ColumnDefinition{});
+        grid.ColumnDefinitions().Append(ColumnDefinition{});
+        grid.ColumnDefinitions().GetAt(0).Width(GridLengthHelper::FromValueAndType(1.0, GridUnitType::Star));
+        grid.ColumnDefinitions().GetAt(1).Width(GridLengthHelper::Auto());
+
+        StackPanel head{};
+        head.Orientation(Orientation::Horizontal);
+        head.Spacing(10);
+
+        Image icon{};
+        icon.Width(48);
+        icon.Height(48);
+        icon.Stretch(Stretch::Uniform);
+        if (!iconUrl.empty())
+            LoadIcon(iconUrl, icon);
+        head.Children().Append(icon);
+
+        StackPanel info{};
+        info.Spacing(2);
+        head.Children().Append(info);
+        TextBlock titleBlock{};
+        titleBlock.Text(title);
+        titleBlock.Style(Application::Current().Resources().Lookup(box_value(L"SubtitleTextBlockStyle")).as<Style>());
+        info.Children().Append(titleBlock);
+        TextBlock descBlock{};
+        descBlock.Text(desc);
+        descBlock.Style(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>());
+        descBlock.Opacity(0.7);
+        descBlock.TextWrapping(TextWrapping::Wrap);
+        info.Children().Append(descBlock);
+        TextBlock metaBlock{};
+        metaBlock.Text(meta);
+        metaBlock.Style(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>());
+        metaBlock.Opacity(0.6);
+        info.Children().Append(metaBlock);
+
+        StackPanel actions{};
+        actions.Spacing(6);
+        actions.VerticalAlignment(VerticalAlignment::Center);
+        Button install{};
+        install.Content(box_value(L"Install"));
+        install.Click([onInstall](IInspectable const&, RoutedEventArgs const&) {
+            if (onInstall)
+                onInstall();
+        });
+        actions.Children().Append(install);
+        Button builds{};
+        builds.Content(box_value(L"Builds"));
+        builds.Click([onBuilds](IInspectable const&, RoutedEventArgs const&) {
+            if (onBuilds)
+                onBuilds();
+        });
+        actions.Children().Append(builds);
+
+        Grid::SetColumn(info, 0);
+        Grid::SetColumn(actions, 1);
+        grid.Children().Append(head);
+        grid.Children().Append(actions);
+        card.Child(grid);
+        m_results.Children().Append(card);
+    }
+
     void ModsPage::FetchPage()
     {
         if (m_loading)
             return;
         m_loading = true;
         int gen = m_searchGen;
+        if (m_source == Source::CurseForge)
+        {
+            hstring key = LoadSettings().curseforgeKey;
+            if (key.empty())
+            {
+                m_loading = false;
+                SetStatus(L"CurseForge needs an API key: paste yours in Settings (free at the CurseForge API console).");
+                return;
+            }
+            SetStatus(L"Searching CurseForge...");
+            CurseForge::SearchAsync(
+                m_lastQuery, m_lastMc, m_lastLoader, m_offset, key,
+                [this, gen](CurseForge::SearchResult result) {
+                    if (gen != m_searchGen)
+                        return; // superseded by a newer search; keep new state
+                    m_loading = false;
+                    if (result.hits.empty() && m_offset == 0)
+                    {
+                        SetStatus(L"No results (check the query, key, or offline?).");
+                        return;
+                    }
+                    m_total = result.total;
+                    m_offset += static_cast<int>(result.hits.size());
+                    wchar_t buf[256]{};
+                    std::wstring filter{ m_lastMc.empty() ? L"" : L" for " + std::wstring{ m_lastMc } };
+                    if (!m_lastLoader.empty() && m_lastLoader != L"all")
+                        filter += L" " + std::wstring{ m_lastLoader };
+                    if (m_total > 0)
+                        swprintf_s(buf, L"%d of %lld results%s (scroll for more).", m_offset, m_total, filter.c_str());
+                    else
+                        swprintf_s(buf, L"%d result(s)%s.", m_offset, filter.c_str());
+                    SetStatus(buf);
+                    for (auto const& hit : result.hits)
+                    {
+                        wchar_t mbuf[160]{};
+                        swprintf_s(mbuf, L"downloads %lld | cf %d", hit.downloads, hit.modId);
+                        AddResultCard(hit.title, hit.description, mbuf, hit.iconUrl,
+                            [this, hit]() { OnInstallCF(hit); },
+                            [this, hit]() { BuildsDialogCF(hit); });
+                    }
+                });
+            return;
+        }
         SetStatus(L"Searching Modrinth...");
         Modrinth::SearchAsync(
             m_lastQuery, m_lastMc, m_lastLoader, m_offset,
@@ -309,71 +465,11 @@ namespace winrt::PretClient
                 SetStatus(buf);
                 for (auto const& hit : result.hits)
                 {
-                    Border card{};
-                    card.Background(Theme::CardBrush());
-                    card.BorderBrush(Theme::CardStroke());
-                    card.BorderThickness(ThicknessHelper::FromUniformLength(1));
-                    card.CornerRadius(CornerRadiusHelper::FromUniformRadius(8));
-                    card.Padding(ThicknessHelper::FromUniformLength(12));
-
-                    Grid grid{};
-                    grid.ColumnSpacing(12);
-                    grid.ColumnDefinitions().Append(ColumnDefinition{});
-                    grid.ColumnDefinitions().Append(ColumnDefinition{});
-                    grid.ColumnDefinitions().GetAt(0).Width(GridLengthHelper::FromValueAndType(1.0, GridUnitType::Star));
-                    grid.ColumnDefinitions().GetAt(1).Width(GridLengthHelper::Auto());
-
-                    StackPanel head{};
-                    head.Orientation(Orientation::Horizontal);
-                    head.Spacing(10);
-
-                    Image icon{};
-                    icon.Width(48);
-                    icon.Height(48);
-                    icon.Stretch(Stretch::Uniform);
-                    if (!hit.iconUrl.empty())
-                        LoadIcon(hit.iconUrl, icon);
-                    head.Children().Append(icon);
-
-                    StackPanel info{};
-                    info.Spacing(2);
-                    head.Children().Append(info);
-                    TextBlock title{};
-                    title.Text(hit.title);
-                    title.Style(Application::Current().Resources().Lookup(box_value(L"SubtitleTextBlockStyle")).as<Style>());
-                    info.Children().Append(title);
-                    TextBlock desc{};
-                    desc.Text(hit.description);
-                    desc.Style(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>());
-                    desc.Opacity(0.7);
-                    desc.TextWrapping(TextWrapping::Wrap);
-                    info.Children().Append(desc);
-                    TextBlock meta{};
                     wchar_t mbuf[128]{};
                     swprintf_s(mbuf, L"downloads %lld | %s", hit.downloads, std::wstring{ hit.slug }.c_str());
-                    meta.Text(mbuf);
-                    meta.Style(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>());
-                    meta.Opacity(0.6);
-                    info.Children().Append(meta);
-
-                    StackPanel actions{};
-                    actions.Spacing(6);
-                    actions.VerticalAlignment(VerticalAlignment::Center);
-                    Button install{};
-                    install.Content(box_value(L"Install"));
-                    install.Click([this, hit](IInspectable const&, RoutedEventArgs const&) { OnInstall(hit); });
-                    actions.Children().Append(install);
-                    Button builds{};
-                    builds.Content(box_value(L"Builds"));
-                    builds.Click([this, hit](IInspectable const&, RoutedEventArgs const&) { BuildsDialog(hit); });
-                    actions.Children().Append(builds);
-
-                    Grid::SetColumn(info, 0);
-                    Grid::SetColumn(actions, 1);
-                    grid.Children().Append(head);
-                    grid.Children().Append(actions);
-                    card.Child(grid);
-                    m_results.Children().Append(card);
+                    AddResultCard(hit.title, hit.description, mbuf, hit.iconUrl,
+                        [this, hit]() { OnInstall(hit); },
+                        [this, hit]() { BuildsDialog(hit); });
                 }
             });
     }
@@ -566,6 +662,199 @@ namespace winrt::PretClient
                     list.Children().Append(card);
                 }
             });
+
+        co_await dialog.ShowAsync();
+    }
+
+    fire_and_forget ModsPage::OnInstallCF(CurseForge::ModHit hit)
+    {
+        if (m_targets.empty() || m_target.SelectedIndex() < 0)
+        {
+            SetStatus(L"Pick a target instance first.");
+            co_return;
+        }
+        auto inst = m_targets[static_cast<size_t>(m_target.SelectedIndex())];
+        if (inst.loader == L"vanilla")
+        {
+            SetStatus(L"Target is vanilla (no mod loader) — mods won't load. Create a modded instance instead.");
+            co_return;
+        }
+        hstring loader = inst.loader == L"vanilla" ? m_lastLoader : inst.loader;
+        if (loader == L"all")
+            loader = L"";
+        hstring mc = inst.mcVersion;
+        hstring key = LoadSettings().curseforgeKey;
+        if (key.empty())
+        {
+            SetStatus(L"CurseForge needs an API key: paste yours in Settings.");
+            co_return;
+        }
+        SetStatus(hstring{ L"Resolving " } + hit.title + L"... (CurseForge)");
+        CurseForge::PickFileAsync(
+            hit.modId, mc, loader, key,
+            [this, hit, inst](CurseForge::ModFile file) {
+                if (file.url.empty())
+                {
+                    SetStatus(L"No matching file (version/loader?). Try Builds for a specific one.");
+                    return;
+                }
+                auto settings = LoadSettings();
+                auto mods = InstanceModsDir(settings, inst.id);
+                SetStatus(hstring{ L"Downloading " } + file.filename + L"... (CurseForge)");
+                InstallOneFileCF(file, mods.wstring());
+            });
+    }
+
+    fire_and_forget ModsPage::InstallOneFileCF(CurseForge::ModFile file, std::wstring modsDir)
+    {
+        hstring status;
+        try
+        {
+            status = co_await CurseForge::DownloadFileAsync(file, modsDir);
+        }
+        catch (...)
+        {
+            status = L"Install failed.";
+        }
+        SetStatus(status);
+    }
+
+    fire_and_forget ModsPage::BuildsDialogCF(CurseForge::ModHit hit)
+    {
+        // Same instance-locked filter as the list: only builds matching the
+        // target instance version/loader are offered.
+        hstring mc = m_lastMc;
+        hstring loader = m_lastLoader;
+        if (!m_targets.empty() && m_target.SelectedIndex() >= 0 &&
+            static_cast<size_t>(m_target.SelectedIndex()) < m_targets.size())
+        {
+            auto const& inst = m_targets[static_cast<size_t>(m_target.SelectedIndex())];
+            mc = inst.mcVersion;
+            if (inst.loader != L"vanilla")
+                loader = inst.loader;
+        }
+        if (loader == L"all")
+            loader = L"";
+
+        StackPanel panel{};
+        panel.Spacing(8);
+        TextBlock loading{};
+        loading.Text(L"Loading builds... (CurseForge)");
+        loading.Opacity(0.7);
+        panel.Children().Append(loading);
+        StackPanel list{};
+        list.Spacing(6);
+        panel.Children().Append(list);
+
+        ContentDialog dialog{};
+        dialog.Title(box_value(hit.title + L" - builds (CurseForge)"));
+        dialog.Content(panel);
+        dialog.CloseButtonText(L"Close");
+        dialog.XamlRoot(m_root.XamlRoot());
+
+        std::wstring modsDir;
+        bool targetVanilla = false;
+        if (!m_targets.empty() && m_target.SelectedIndex() >= 0 &&
+            static_cast<size_t>(m_target.SelectedIndex()) < m_targets.size())
+        {
+            auto inst = m_targets[static_cast<size_t>(m_target.SelectedIndex())];
+            targetVanilla = (inst.loader == L"vanilla");
+            auto settings = LoadSettings();
+            modsDir = InstanceModsDir(settings, inst.id).wstring();
+        }
+
+        hstring key = LoadSettings().curseforgeKey;
+        if (key.empty())
+        {
+            loading.Text(L"CurseForge needs an API key: paste yours in Settings.");
+        }
+        else
+        {
+            CurseForge::GetVersionsAsync(
+                hit.modId, mc, loader, key,
+                [this, list, loading, modsDir, dialog, targetVanilla](std::vector<CurseForge::ModVersion> versions) mutable {
+                    loading.Visibility(Visibility::Collapsed);
+                    if (versions.empty())
+                    {
+                        TextBlock t{};
+                        t.Text(L"No builds match this instance version.");
+                        t.Opacity(0.7);
+                        list.Children().Append(t);
+                        return;
+                    }
+                    int shown = 0;
+                    for (auto const& v : versions)
+                    {
+                        if (++shown > 30)
+                            break;
+                        Border card{};
+                        card.Background(Theme::CardBrush());
+                        card.BorderBrush(Theme::CardStroke());
+                        card.BorderThickness(ThicknessHelper::FromUniformLength(1));
+                        card.CornerRadius(CornerRadiusHelper::FromUniformRadius(6));
+                        card.Padding(ThicknessHelper::FromUniformLength(10));
+
+                        Grid grid{};
+                        grid.ColumnSpacing(10);
+                        grid.ColumnDefinitions().Append(ColumnDefinition{});
+                        grid.ColumnDefinitions().Append(ColumnDefinition{});
+                        grid.ColumnDefinitions().GetAt(0).Width(GridLengthHelper::FromValueAndType(1.0, GridUnitType::Star));
+                        grid.ColumnDefinitions().GetAt(1).Width(GridLengthHelper::Auto());
+
+                        StackPanel info{};
+                        TextBlock name{};
+                        name.Text(v.versionNumber);
+                        info.Children().Append(name);
+                        TextBlock meta{};
+                        hstring fileName = v.files.empty() ? hstring{} : v.files.front().filename;
+                        meta.Text(hstring{ L"file " } + v.id + (fileName.empty() ? hstring{} : hstring{ L" | " } + fileName));
+                        meta.Opacity(0.6);
+                        meta.Style(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>());
+                        info.Children().Append(meta);
+
+                        Button install{};
+                        install.Content(box_value(L"Install this"));
+                        install.VerticalAlignment(VerticalAlignment::Center);
+                        install.Click([this, v, modsDir, dialog, targetVanilla](IInspectable const&, RoutedEventArgs const&) mutable {
+                            if (targetVanilla)
+                            {
+                                SetStatus(L"Target is vanilla (no mod loader) — mods won't load. Create a modded instance instead.");
+                                return;
+                            }
+                            CurseForge::ModFile file{};
+                            for (auto const& f : v.files)
+                            {
+                                if (!f.url.empty())
+                                {
+                                    file = f;
+                                    break;
+                                }
+                            }
+                            if (file.url.empty() || modsDir.empty())
+                            {
+                                SetStatus(L"No file in that build (or no target instance).");
+                                return;
+                            }
+                            SetStatus(hstring{ L"Downloading " } + file.filename + L"... (CurseForge)");
+                            InstallOneFileCF(file, modsDir);
+                            try
+                            {
+                                dialog.Hide();
+                            }
+                            catch (...)
+                            {
+                            }
+                        });
+
+                        Grid::SetColumn(info, 0);
+                        Grid::SetColumn(install, 1);
+                        grid.Children().Append(info);
+                        grid.Children().Append(install);
+                        card.Child(grid);
+                        list.Children().Append(card);
+                    }
+                });
+        }
 
         co_await dialog.ShowAsync();
     }

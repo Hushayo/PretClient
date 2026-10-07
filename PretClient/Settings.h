@@ -11,6 +11,7 @@ namespace winrt::PretClient
         std::vector<hstring> profiles{};
         hstring gameDir{}; // empty = roaming .minecraft
         hstring javaPath{};
+        hstring curseforgeKey{}; // per-user CurseForge API key (Mods page tab)
         int minMemMb = 512;
         int maxMemMb = 2048;
     };

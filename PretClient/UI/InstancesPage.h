@@ -4,14 +4,16 @@
 #include "../System/Stats.h"
 #include <atomic>
 #include <filesystem>
+#include <functional>
 #include <map>
 #include <set>
 
 // Instances page: long cards with loader badge, version, live CPU/RAM/GPU,
 // game log, progress bar with speed, Play / Stop / Restart, per-instance
 // mods manager (any loader: enable/disable, remove, update check), delete,
-// profile switching, New dialog fed by the real piston-meta manifest
-// (release/snapshot/beta/alpha).
+// New dialog fed by the real piston-meta manifest
+// (release/snapshot/beta/alpha). Profiles dialog is hosted here but opened
+// from the MainWindow top-right round avatar.
 namespace winrt::PretClient
 {
     namespace Downloader
@@ -27,6 +29,11 @@ namespace winrt::PretClient
             return m_root;
         }
         void Refresh();
+        winrt::fire_and_forget ProfileDialog();
+        void SetOnProfileChanged(std::function<void()> cb)
+        {
+            m_onProfileChanged = std::move(cb);
+        }
 
     private:
         // Last known download progress per instance. Cards are rebuilt on
@@ -86,13 +93,12 @@ namespace winrt::PretClient
             Microsoft::UI::Xaml::Controls::TextBox nameBox,
             Microsoft::UI::Xaml::Controls::ComboBox versionBox,
             Microsoft::UI::Xaml::Controls::ComboBox loaderBox,
-            Microsoft::UI::Xaml::Controls::TextBox loaderVerBox);
-        winrt::fire_and_forget ProfileDialog();
+            Microsoft::UI::Xaml::Controls::ComboBox loaderVerBox);
 
         Microsoft::UI::Xaml::Controls::StackPanel m_root{};
         Microsoft::UI::Xaml::Controls::StackPanel m_cards{};
         Microsoft::UI::Xaml::Controls::TextBlock m_status{};
-        Microsoft::UI::Xaml::Controls::Button m_profile{};
+        std::function<void()> m_onProfileChanged{};
         std::vector<Card> m_cardList{};
         SystemStats::Sampler m_sampler{};
         Microsoft::UI::Dispatching::DispatcherQueueTimer m_timer{ nullptr };

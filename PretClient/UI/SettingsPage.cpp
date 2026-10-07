@@ -41,6 +41,10 @@ namespace winrt::PretClient
         m_java.Header(box_value(L"Java path (empty = auto-detect)"));
         m_root.Children().Append(m_java);
 
+        m_cfKey.Header(box_value(L"CurseForge API key (for the CurseForge mods tab)"));
+        m_cfKey.PlaceholderText(L"Get one free at curseforge.com API console");
+        m_root.Children().Append(m_cfKey);
+
         TextBlock memHead{};
         memHead.Text(L"Max memory");
         m_root.Children().Append(memHead);
@@ -54,10 +58,13 @@ namespace winrt::PretClient
         save.Content(box_value(L"Save"));
         save.Style(Application::Current().Resources().Lookup(box_value(L"AccentButtonStyle")).as<Style>());
         save.Click([this](IInspectable const&, RoutedEventArgs const&) {
-            Settings s{};
+            // Start from the stored settings so Save never wipes fields this
+            // page doesn't edit (profiles list, etc.).
+            Settings s = LoadSettings();
             s.username = m_username.Text().empty() ? hstring{ L"Steve" } : hstring{ m_username.Text() };
             s.gameDir = m_gameDir.Text();
             s.javaPath = m_java.Text();
+            s.curseforgeKey = m_cfKey.Text();
             int mems[] = { 1024, 2048, 4096, 8192 };
             int idx = m_mem.SelectedIndex();
             s.maxMemMb = (idx >= 0 && idx < 4) ? mems[idx] : 2048;
@@ -99,6 +106,7 @@ namespace winrt::PretClient
         m_username.Text(s.username);
         m_gameDir.Text(EffectiveGameDir(s));
         m_java.Text(s.javaPath);
+        m_cfKey.Text(s.curseforgeKey);
         int idx = 1;
         if (s.maxMemMb >= 8192)
             idx = 3;
