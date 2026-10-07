@@ -46,6 +46,19 @@ namespace winrt::PretClient::CurseForge
     using VersionsFn = std::function<void(std::vector<ModVersion>)>;
     using PickFn = std::function<void(ModFile)>;
 
+    // Public community key (the same one Prism Launcher documents) so the
+    // CurseForge tab works out of the box. A key stored in Settings
+    // overrides it via EffectiveApiKey.
+    inline hstring DefaultApiKey()
+    {
+        return hstring{ L"$2a$10$bL4bIL5pUWqfcO7KQtnMReakwtfHbNKh6v1uTpKlzhwoueEJQnPnm" };
+    }
+
+    inline hstring EffectiveApiKey(hstring const& stored)
+    {
+        return stored.empty() ? DefaultApiKey() : stored;
+    }
+
     winrt::fire_and_forget SearchAsync(
         hstring query, hstring mcVersion, hstring loader, int offset, hstring apiKey, SearchFn done);
     winrt::fire_and_forget GetVersionsAsync(

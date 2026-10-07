@@ -1,6 +1,8 @@
 #include "pch.h"
 #include "SettingsPage.h"
 #include "Theme.h"
+#include "../Minecraft/Auth.h"
+#include "../Minecraft/CurseForge.h"
 #include "../Paths.h"
 #include "../Settings.h"
 #include "../Update/Updater.h"
@@ -28,6 +30,42 @@ namespace winrt::PretClient
         m_username.MaxLength(16);
         m_root.Children().Append(m_username);
 
+        TextBlock accHead{};
+        accHead.Text(L"Account");
+        accHead.Style(Application::Current().Resources().Lookup(box_value(L"SubtitleTextBlockStyle")).as<Style>());
+        m_root.Children().Append(accHead);
+
+        m_account.Opacity(0.7);
+        m_account.TextWrapping(TextWrapping::Wrap);
+        m_root.Children().Append(m_account);
+
+        StackPanel accRow{};
+        accRow.Orientation(Orientation::Horizontal);
+        accRow.Spacing(8);
+        m_signIn.Content(box_value(L"Sign in with Microsoft"));
+        m_signIn.Click([this](IInspectable const&, RoutedEventArgs const&) { SignIn(); });
+        accRow.Children().Append(m_signIn);
+        m_signOut.Content(box_value(L"Sign out"));
+        m_signOut.Click([this](IInspectable const&, RoutedEventArgs const&) {
+            Auth::SignOut();
+            Refresh();
+            SetStatus(L"Signed out. Offline mode.");
+        });
+        accRow.Children().Append(m_signOut);
+        m_root.Children().Append(accRow);
+
+        m_clientId.Header(box_value(L"Azure client ID (Microsoft sign-in)"));
+        m_root.Children().Append(m_clientId);
+
+        TextBlock accHint{};
+        accHint.Opacity(0.6);
+        accHint.TextWrapping(TextWrapping::Wrap);
+        accHint.Style(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>());
+        accHint.Text(L"Register an app at portal.azure.com (consumers accounts, no secret) and paste "
+                     L"its client ID. New apps must also be approved for Minecraft Services "
+                     L"(aka.ms/mce-reviewappid) or sign-in stops at a 403. Leave empty to play offline.");
+        m_root.Children().Append(accHint);
+
         m_gameDir.Header(box_value(L"Game folder (roaming .minecraft)"));
         m_root.Children().Append(m_gameDir);
 
@@ -41,8 +79,8 @@ namespace winrt::PretClient
         m_java.Header(box_value(L"Java path (empty = auto-detect)"));
         m_root.Children().Append(m_java);
 
-        m_cfKey.Header(box_value(L"CurseForge API key (for the CurseForge mods tab)"));
-        m_cfKey.PlaceholderText(L"Get one free at curseforge.com API console");
+        m_cfKey.Header(box_value(L"CurseForge API key (public community key is pre-filled)"));
+        m_cfKey.PlaceholderText(L"Replace with your own key if you have one");
         m_root.Children().Append(m_cfKey);
 
         TextBlock memHead{};
@@ -64,6 +102,7 @@ namespace winrt::PretClient
             s.username = m_username.Text().empty() ? hstring{ L"Steve" } : hstring{ m_username.Text() };
             s.gameDir = m_gameDir.Text();
             s.javaPath = m_java.Text();
+            s.msClientId = m_clientId.Text();
             s.curseforgeKey = m_cfKey.Text();
             int mems[] = { 1024, 2048, 4096, 8192 };
             int idx = m_mem.SelectedIndex();
@@ -104,9 +143,13 @@ namespace winrt::PretClient
     {
         auto s = LoadSettings();
         m_username.Text(s.username);
+        m_clientId.Text(s.msClientId);
+        hstring acc = Auth::AccountName();
+        m_account.Text(acc.empty() ? hstring{ L"Mode: offline (" } + s.username + L"). Online servers need a Microsoft sign-in."
+                                   : hstring{ L"Mode: Microsoft (" } + acc + L"). Launches use this account.");
         m_gameDir.Text(EffectiveGameDir(s));
         m_java.Text(s.javaPath);
-        m_cfKey.Text(s.curseforgeKey);
+        m_cfKey.Text(s.curseforgeKey.empty() ? CurseForge::DefaultApiKey() : s.curseforgeKey);
         int idx = 1;
         if (s.maxMemMb >= 8192)
             idx = 3;
@@ -120,5 +163,31 @@ namespace winrt::PretClient
     void SettingsPage::SetStatus(hstring const& line)
     {
         m_status.Text(line);
+    }
+
+    void SettingsPage::SignIn()
+    {
+        // Persist the client ID first so refreshes keep working.
+        try
+        {
+            Settings s = LoadSettings();
+            s.msClientId = m_clientId.Text();
+            SaveSettings(s);
+        }
+        catch (...)
+        {
+        }
+        m_signIn.IsEnabled(false);
+        m_signOut.IsEnabled(false);
+        SetStatus(L"Starting Microsoft sign-in...");
+        Auth::SignInAsync(m_clientId.Text(),
+            [this](hstring line) { SetStatus(line); },
+            [this](bool ok, hstring message) {
+                m_signIn.IsEnabled(true);
+                m_signOut.IsEnabled(true);
+                Refresh();
+                SetStatus(message);
+                (void)ok;
+            });
     }
 }

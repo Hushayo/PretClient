@@ -399,7 +399,7 @@ namespace winrt::PretClient
         int gen = m_searchGen;
         if (m_source == Source::CurseForge)
         {
-            hstring key = LoadSettings().curseforgeKey;
+            hstring key = CurseForge::EffectiveApiKey(LoadSettings().curseforgeKey);
             if (key.empty())
             {
                 m_loading = false;
@@ -683,7 +683,7 @@ namespace winrt::PretClient
         if (loader == L"all")
             loader = L"";
         hstring mc = inst.mcVersion;
-        hstring key = LoadSettings().curseforgeKey;
+        hstring key = CurseForge::EffectiveApiKey(LoadSettings().curseforgeKey);
         if (key.empty())
         {
             SetStatus(L"CurseForge needs an API key: paste yours in Settings.");
@@ -763,7 +763,7 @@ namespace winrt::PretClient
             modsDir = InstanceModsDir(settings, inst.id).wstring();
         }
 
-        hstring key = LoadSettings().curseforgeKey;
+        hstring key = CurseForge::EffectiveApiKey(LoadSettings().curseforgeKey);
         if (key.empty())
         {
             loading.Text(L"CurseForge needs an API key: paste yours in Settings.");
