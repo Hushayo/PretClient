@@ -1175,7 +1175,7 @@ namespace winrt::PretClient
 
             auto bit = m_backlog.find(std::wstring{ m_detailId });
             if (bit != m_backlog.end())
-                m_dLog.Text(bit->second);
+                m_dLog.Text(hstring{ bit->second });
             UpdateDetailStatus();
             RefreshDetailFiles();
             RefreshDetailBackups();
@@ -1186,8 +1186,10 @@ namespace winrt::PretClient
                     try
                     {
                         if (m_dScroll)
-                            m_dScroll.ChangeView(nullptr,
-                                box_value(m_dScroll.ScrollableHeight()), nullptr);
+                        {
+                            double v = m_dScroll.ScrollableHeight();
+                            m_dScroll.ChangeView(nullptr, box_value(v), nullptr);
+                        }
                     }
                     catch (...)
                     {
@@ -1295,8 +1297,8 @@ namespace winrt::PretClient
                 return;
             Server::SendConsole(m_detailId, line);
             auto& back = m_backlog[std::wstring{ m_detailId }];
-            back += L"> " + hstring{ line } + L"\n";
-            if (m_backlog.size() > 0 && back.size() > 220000)
+            back += L"> " + line + L"\n";
+            if (back.size() > 220000)
             {
                 auto pos = back.find(L'\n', 20000);
                 if (pos != std::wstring::npos)
@@ -1304,7 +1306,7 @@ namespace winrt::PretClient
             }
             m_dInput.Text(L"");
             if (m_dLog)
-                m_dLog.Text(back);
+                m_dLog.Text(hstring{ back });
         }
         catch (...)
         {
@@ -1318,9 +1320,15 @@ namespace winrt::PretClient
             std::wstring key{ id };
             auto& back = m_backlog[key];
             if (!line.empty())
-                back += to_hstring(line) + L"\n";
+                back += to_hstring(line).c_str();
+            if (!line.empty())
+                back += L"\n";
             if (exited)
-                back += L"--- process exited (" + to_hstring(exitCode) + L") ---\n";
+            {
+                back += L"--- process exited (";
+                back += std::to_wstring(exitCode);
+                back += L") ---\n";
+            }
             if (back.size() > 220000)
             {
                 auto pos = back.find(L'\n', 20000);
@@ -1329,12 +1337,14 @@ namespace winrt::PretClient
             }
             if (id == m_detailId && m_detail.Visibility() == Visibility::Visible && m_dLog)
             {
-                m_dLog.Text(back);
+                m_dLog.Text(hstring{ back });
                 try
                 {
                     if (m_dScroll)
-                        m_dScroll.ChangeView(
-                            nullptr, box_value(m_dScroll.ScrollableHeight()), nullptr);
+                    {
+                        double v = m_dScroll.ScrollableHeight();
+                        m_dScroll.ChangeView(nullptr, box_value(v), nullptr);
+                    }
                 }
                 catch (...)
                 {
@@ -1483,7 +1493,8 @@ namespace winrt::PretClient
                     try
                     {
                         auto p = std::filesystem::path{ m_detailRel }.parent_path().wstring();
-                        m_detailRel = (p == L"." || p == L"/") ? std::wstring{} : p;
+                        if (!p.empty() && p != L"." && p != L"/")
+                            m_detailRel = p;
                         RefreshDetailFiles();
                     }
                     catch (...)
@@ -1526,7 +1537,8 @@ namespace winrt::PretClient
                         {
                             auto root2 = Server::ServersDir() / std::wstring{ m_detailId };
                             auto rel = std::filesystem::relative(p, root2).wstring();
-                            m_detailRel = (rel == L"." ? std::wstring{} : rel);
+                            if (!rel.empty() && rel != L".")
+                                m_detailRel = rel;
                             RefreshDetailFiles();
                         }
                         else
@@ -1709,10 +1721,11 @@ namespace winrt::PretClient
             m_dDiskHist.clear();
             hstring id = m_detailId;
             auto dir = Server::ServersDir() / std::wstring{ id };
-            std::thread([this, gen, id, dir] {
+            hstring cid = id;
+            std::thread([this, gen, cid, dir] {
                 try
                 {
-                    m_sampler.PollProcessCpu(Server::ConsoleHandle(id)); // seed baseline
+                    m_sampler.PollProcessCpu(Server::ConsoleHandle(cid)); // seed baseline
                     for (;;)
                     {
                         std::this_thread::sleep_for(std::chrono::seconds(1));
@@ -1729,7 +1742,7 @@ namespace winrt::PretClient
                         {
                             std::lock_guard<std::mutex> lk(m_samplerMutex);
                             snap = m_sampler.PollSystem();
-                            if (void* h = Server::ConsoleHandle(id))
+                            if (void* h = Server::ConsoleHandle(cid))
                             {
                                 pcpu = m_sampler.PollProcessCpu(h);
                                 pmem = m_sampler.ProcessPrivateBytes(h);
@@ -1748,7 +1761,7 @@ namespace winrt::PretClient
                         try
                         {
                             m_ui.TryEnqueue(
-                                [this, gen, snap, pcpu, pmem, freeAv, total, memTot, memAv, diskOk] {
+                                [this, gen, snap, pcpu, pmem, freeAv, total, memTot, memAv, diskOk, cid] {
                                     try
                                     {
                                         if (gen != m_detailGen)
@@ -1798,7 +1811,7 @@ namespace winrt::PretClient
                                         {
                                             if (pcpu < 0.0 && pmem == 0)
                                             {
-                                                m_dProc.Text(Server::ConsoleRunning(id)
+                                                m_dProc.Text(Server::ConsoleRunning(cid)
                                                         ? L"Server process: starting..."
                                                         : L"Server process: stopped");
                                             }

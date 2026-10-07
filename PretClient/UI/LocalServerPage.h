@@ -125,6 +125,6 @@ namespace winrt::PretClient
         std::mutex m_samplerMutex{};
         std::atomic<int> m_detailGen{ 0 };
         std::atomic<bool> m_detailStop{ false };
-        std::map<std::wstring, hstring> m_backlog{}; // console text per server
+        std::map<std::wstring, std::wstring> m_backlog{}; // console text per server
     };
 }

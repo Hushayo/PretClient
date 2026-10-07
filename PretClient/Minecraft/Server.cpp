@@ -6,6 +6,7 @@
 #include "NeoForge.h"
 #include "Quilt.h"
 #include "../Paths.h"
+#include <algorithm>
 #include <coroutine>
 #include <cwctype>
 #include <fstream>
@@ -1000,7 +1001,7 @@ namespace winrt::PretClient::Server
                 std::wstring n = p.filename().wstring();
                 std::wstring low = n;
                 for (auto& c : low)
-                    c = static_cast<wchar_t>(towlower(c));
+                    c = static_cast<wchar_t>(std::towlower(c));
                 if (low.find(L"installer") != std::wstring::npos || low == L"buildtools.jar")
                     continue;
                 if (low.rfind(L"spigot-", 0) == 0 || low.rfind(L"minecraft_server", 0) == 0)
