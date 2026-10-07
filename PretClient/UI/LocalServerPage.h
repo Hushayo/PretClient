@@ -19,7 +19,9 @@ namespace winrt::PretClient
         void Refresh();
 
     private:
-        winrt::fire_and_forget CreateDialog();
+        // (Named to dodge the Win32 CreateDialog macro: winuser.h rewrites
+        // CreateDialog to CreateDialogW, which breaks the declaration.)
+        winrt::fire_and_forget OpenCreateDialog();
         void LoadVersions(hstring softwareId);
         // Resolve -> download (+verify) -> installer/BuildTools when needed
         // -> run.bat + servers.json record. Progress lives on the page.

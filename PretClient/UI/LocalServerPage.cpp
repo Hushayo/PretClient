@@ -103,7 +103,7 @@ namespace winrt::PretClient
             Windows::UI::ColorHelper::FromArgb(0xFF, 0x00, 0x78, 0xD4) });
         m_create.Foreground(Media::SolidColorBrush{
             Windows::UI::ColorHelper::FromArgb(0xFF, 0xFF, 0xFF, 0xFF) });
-        m_create.Click([this](IInspectable const&, RoutedEventArgs const&) { CreateDialog(); });
+        m_create.Click([this](IInspectable const&, RoutedEventArgs const&) { OpenCreateDialog(); });
         m_root.Children().Append(m_create);
 
         m_progress.Minimum(0);
@@ -235,7 +235,7 @@ namespace winrt::PretClient
         }
     }
 
-    fire_and_forget LocalServerPage::CreateDialog()
+    fire_and_forget LocalServerPage::OpenCreateDialog()
     {
         try
         {
@@ -294,7 +294,8 @@ namespace winrt::PretClient
             resHead.Style(Application::Current().Resources().Lookup(box_value(L"SubtitleTextBlockStyle")).as<Style>());
             panel.Children().Append(resHead);
 
-            auto addGraph = [&](wchar_t const* name, TextBlock& value, Polyline& line,
+            auto addGraph = [&](wchar_t const* name, TextBlock& value,
+                Microsoft::UI::Xaml::Shapes::Polyline& line,
                 Windows::UI::Color color) {
                 StackPanel row{};
                 row.Spacing(4);
@@ -309,7 +310,7 @@ namespace winrt::PretClient
                 top.Children().Append(label);
                 top.Children().Append(value);
                 row.Children().Append(top);
-                line = Polyline{};
+                line = Microsoft::UI::Xaml::Shapes::Polyline{};
                 line.Stroke(Media::SolidColorBrush{ color });
                 line.StrokeThickness(2);
                 Canvas canvas{};
@@ -670,7 +671,8 @@ namespace winrt::PretClient
         PaintGraph(m_diskLine, m_diskHist);
     }
 
-    void LocalServerPage::PaintGraph(Polyline const& line, std::deque<double> const& hist)
+    void LocalServerPage::PaintGraph(Microsoft::UI::Xaml::Shapes::Polyline const& line,
+        std::deque<double> const& hist)
     {
         try
         {
