@@ -1,5 +1,5 @@
 # Created with https://github.com/Hushayo/PretClient/blob/main/winget/manifests
-# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultlocale.1.12.0.schema.json
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.locale.1.12.0.schema.json
 PackageIdentifier: Hushayo.PretClient
 PackageVersion: 2.0.14
 PackageLocale: en-US
@@ -25,5 +25,5 @@ Tags:
 - modrinth
 - offline
 ReleaseNotesUrl: https://github.com/Hushayo/PretClient/releases/tag/v2.0.14
-ManifestType: defaultLocale
+ManifestType: locale
 ManifestVersion: 1.12.0
