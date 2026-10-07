@@ -241,6 +241,56 @@ namespace winrt::PretClient::Http
         }
     }
 
+    // Same as below but keeps raw bytes (used for mod icon PNGs).
+    inline bool ZipEntryToBytes(std::filesystem::path const& zip,
+        std::wstring const& entry, std::vector<std::uint8_t>& out)
+    {
+        try
+        {
+            out.clear();
+            SECURITY_ATTRIBUTES sa{ sizeof(sa), nullptr, TRUE };
+            HANDLE rd = nullptr;
+            HANDLE wr = nullptr;
+            if (!CreatePipe(&rd, &wr, &sa, 0))
+                return false;
+            SetHandleInformation(rd, HANDLE_FLAG_INHERIT, 0);
+
+            STARTUPINFOW si{ sizeof(si) };
+            si.dwFlags = STARTF_USESHOWWINDOW | STARTF_USESTDHANDLES;
+            si.wShowWindow = SW_HIDE;
+            si.hStdOutput = wr;
+            si.hStdInput = nullptr;
+            si.hStdError = nullptr;
+            PROCESS_INFORMATION pi{};
+            std::wstring cmd = L"tar -xOf \"" + zip.wstring() + L"\" " + entry;
+            std::wstring mutableCmd = cmd;
+            bool ok = CreateProcessW(nullptr, mutableCmd.data(), nullptr, nullptr, TRUE,
+                CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi);
+            CloseHandle(wr);
+            wr = nullptr;
+            if (!ok)
+            {
+                CloseHandle(rd);
+                return false;
+            }
+            char buf[8192];
+            DWORD got = 0;
+            while (ReadFile(rd, buf, sizeof(buf), &got, nullptr) && got > 0)
+                out.insert(out.end(), buf, buf + got);
+            CloseHandle(rd);
+            WaitForSingleObject(pi.hProcess, INFINITE);
+            DWORD code = 1;
+            GetExitCodeProcess(pi.hProcess, &code);
+            CloseHandle(pi.hProcess);
+            CloseHandle(pi.hThread);
+            return code == 0 && !out.empty();
+        }
+        catch (...)
+        {
+            return false;
+        }
+    }
+
     // Read one entry out of a zip (jars are zips) via the inbox tar.exe,
     // streaming to stdout through a pipe. Used to read fabric.mod.json.
     inline bool ZipEntryToString(std::filesystem::path const& zip,

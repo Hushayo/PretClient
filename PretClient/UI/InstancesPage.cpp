@@ -12,6 +12,7 @@
 #include "../Minecraft/Launcher.h"
 #include "../Minecraft/Versions.h"
 #include "../Settings.h"
+#include "../Paths.h"
 #include <coroutine>
 #include <winrt/Windows.UI.Text.h>
 
@@ -542,14 +543,195 @@ namespace winrt::PretClient
     namespace
     {
         // One row of the mods dialog: what file it is plus the live widgets
-        // an async update check may want to touch later.
+        // an async update check may want to touch later. Name/version/icon
+        // come from the jar's fabric.mod.json (never the filename).
+        struct ModMeta
+        {
+            hstring modId{};
+            hstring name{};
+            hstring version{};
+            hstring icon{}; // path inside the jar, "" when none
+        };
+
         struct ModRow
         {
             std::filesystem::path file{};
             bool enabled = true;
+            Microsoft::UI::Xaml::Controls::TextBlock name{};
+            Microsoft::UI::Xaml::Controls::TextBlock version{};
             Microsoft::UI::Xaml::Controls::TextBlock status{};
             Microsoft::UI::Xaml::Controls::StackPanel actions{};
+            Microsoft::UI::Xaml::Controls::Image icon{};
+            ModMeta meta{};
         };
+
+        using ModMetaCache = std::map<std::wstring, ModMeta>;
+
+        ModMeta ReadModMeta(std::filesystem::path const& jar)
+        {
+            ModMeta m{};
+            try
+            {
+                std::string text;
+                if (!Http::ZipEntryToString(jar, L"fabric.mod.json", text) || text.empty())
+                    return m;
+                auto o = JsonObject::Parse(to_hstring(text));
+                try
+                {
+                    if (o.HasKey(L"id"))
+                        m.modId = o.GetNamedString(L"id");
+                    if (o.HasKey(L"name"))
+                        m.name = o.GetNamedString(L"name");
+                    if (o.HasKey(L"version"))
+                        m.version = o.GetNamedString(L"version");
+                    if (o.HasKey(L"icon"))
+                        m.icon = o.GetNamedString(L"icon");
+                }
+                catch (...)
+                {
+                }
+            }
+            catch (...)
+            {
+            }
+            return m;
+        }
+
+        std::filesystem::path ModIconCachePath(std::filesystem::path const& jar)
+        {
+            std::error_code ec;
+            unsigned long long size = 0;
+            size = static_cast<unsigned long long>(std::filesystem::file_size(jar, ec));
+            wchar_t buf[32]{};
+            swprintf_s(buf, L"_%llu", size);
+            std::wstring stem = jar.stem().wstring();
+            for (auto& c : stem)
+            {
+                if (!(iswalnum(c) || c == L'-' || c == L'_'))
+                    c = L'_';
+            }
+            if (stem.empty())
+                stem = L"mod";
+            return Paths::DataDir() / L"modicons" / (stem + buf + L".png");
+        }
+
+        void PaintModIcon(Microsoft::UI::Xaml::Controls::Image const& img,
+            std::filesystem::path const& png)
+        {
+            try
+            {
+                std::wstring uri{ L"file:///" };
+                std::wstring fp{ png.wstring() };
+                for (auto& c : fp)
+                {
+                    if (c == L'\\')
+                        c = L'/';
+                }
+                uri += fp;
+                img.Source(Microsoft::UI::Xaml::Media::Imaging::BitmapImage{
+                    Windows::Foundation::Uri{ uri } });
+            }
+            catch (...)
+            {
+            }
+        }
+
+        // Extract one jar's icon into the disk cache, then paint it. Runs
+        // the tar extraction off the UI thread; safe to call for detached
+        // (rebuilt-away) rows -- it just paints a dead element.
+        fire_and_forget EnsureModIcon(std::filesystem::path jar, hstring iconRel,
+            Microsoft::UI::Xaml::Controls::Image img,
+            Microsoft::UI::Dispatching::DispatcherQueue queue)
+        {
+            try
+            {
+                auto cached = ModIconCachePath(jar);
+                std::error_code ec;
+                if (!std::filesystem::exists(cached, ec))
+                {
+                    co_await winrt::resume_background();
+                    std::vector<std::uint8_t> bytes;
+                    bool ok = false;
+                    try
+                    {
+                        ok = Http::ZipEntryToBytes(jar, std::wstring{ iconRel }, bytes);
+                    }
+                    catch (...)
+                    {
+                    }
+                    if (!ok || bytes.empty())
+                        co_return;
+                    try
+                    {
+                        std::filesystem::create_directories(cached.parent_path(), ec);
+                        std::ofstream f(cached, std::ios::binary | std::ios::trunc);
+                        if (!f.good())
+                            co_return;
+                        f.write(reinterpret_cast<char const*>(bytes.data()), bytes.size());
+                        f.close();
+                        if (!f)
+                            co_return;
+                    }
+                    catch (...)
+                    {
+                        co_return;
+                    }
+                    co_await ForegroundAwait{ queue };
+                }
+                PaintModIcon(img, cached);
+            }
+            catch (...)
+            {
+            }
+        }
+
+        // Read one jar's fabric.mod.json off the UI thread, cache it, then
+        // fill the row's name/version and kick its icon load.
+        fire_and_forget EnsureModMeta(std::filesystem::path jar,
+            std::shared_ptr<ModMetaCache> cache,
+            std::shared_ptr<std::vector<ModRow>> rows,
+            Microsoft::UI::Dispatching::DispatcherQueue queue)
+        {
+            ModMeta m{};
+            try
+            {
+                co_await winrt::resume_background();
+                m = ReadModMeta(jar);
+            }
+            catch (...)
+            {
+            }
+            try
+            {
+                co_await ForegroundAwait{ queue };
+                (*cache)[jar.wstring()] = m; // negative entries too: don't re-read
+                for (auto& r : *rows)
+                {
+                    if (r.file != jar)
+                        continue;
+                    r.meta = m;
+                    if (!m.name.empty())
+                    {
+                        r.name.Text(m.name);
+                        r.version.Text(m.version);
+                        hstring tip = hstring{ m.name };
+                        if (!m.version.empty())
+                            tip = tip + L" " + m.version;
+                        tip = tip + L"\n" + hstring{ jar.filename().wstring() };
+                        if (!m.modId.empty())
+                            tip = tip + L"\nModrinth id: " + m.modId;
+                        Microsoft::UI::Xaml::Controls::ToolTipService::SetToolTip(
+                            r.name, box_value(tip));
+                    }
+                    if (!m.icon.empty())
+                        EnsureModIcon(jar, m.icon, r.icon, queue);
+                    break;
+                }
+            }
+            catch (...)
+            {
+            }
+        }
 
         struct VersionsWaiter
         {
@@ -649,32 +831,12 @@ namespace winrt::PretClient
         {
             try
             {
-                if (row.status)
-                    row.status.Text(L"reading...");
-                std::string meta;
-                if (!Http::ZipEntryToString(row.file, L"fabric.mod.json", meta) || meta.empty())
-                {
-                    if (row.status)
-                        row.status.Text(L"no fabric.mod.json");
-                    co_return;
-                }
-                auto o = JsonObject::Parse(to_hstring(meta));
-                hstring modId;
-                hstring curVer;
-                try
-                {
-                    if (o.HasKey(L"id"))
-                        modId = o.GetNamedString(L"id");
-                    if (o.HasKey(L"version"))
-                        curVer = o.GetNamedString(L"version");
-                }
-                catch (...)
-                {
-                }
+                hstring modId = row.meta.modId;
+                hstring curVer = row.meta.version;
                 if (modId.empty() || curVer.empty())
                 {
                     if (row.status)
-                        row.status.Text(L"cannot read mod id/version");
+                        row.status.Text(L"cannot check this mod");
                     co_return;
                 }
                 if (row.status)
@@ -865,7 +1027,12 @@ namespace winrt::PretClient
 
         StackPanel list{};
         list.Spacing(6);
-        panel.Children().Append(list);
+        ScrollViewer scroll{};
+        scroll.MaxHeight(430);
+        scroll.VerticalScrollBarVisibility(ScrollBarVisibility::Auto);
+        scroll.HorizontalScrollBarVisibility(ScrollBarVisibility::Disabled);
+        scroll.Content(list);
+        panel.Children().Append(scroll);
 
         TextBlock status{};
         status.Style(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>());
@@ -874,8 +1041,10 @@ namespace winrt::PretClient
         panel.Children().Append(status);
 
         auto rows = std::make_shared<std::vector<ModRow>>();
+        auto metaCache = std::make_shared<ModMetaCache>();
+        auto queue = m_dispatcher;
         auto rebuild = std::make_shared<std::function<void()>>();
-        *rebuild = [rows, list, dirText, modsDir, status,
+        *rebuild = [rows, list, dirText, modsDir, status, metaCache, queue,
             weak = std::weak_ptr<std::function<void()>>(rebuild)]() {
             try
             {
@@ -907,37 +1076,113 @@ namespace winrt::PretClient
                         c = static_cast<wchar_t>(towlower(c));
                     bool enabled = (ext == L".jar");
 
-                    StackPanel row{};
-                    row.Orientation(Orientation::Horizontal);
-                    row.Spacing(8);
+                    ModMeta meta{};
+                    if (auto cit = metaCache->find(p.wstring()); cit != metaCache->end())
+                        meta = cit->second;
 
+                    Grid row{};
+                    row.ColumnSpacing(8);
+                    auto colIcon = ColumnDefinition{};
+                    colIcon.Width(GridLengthHelper::Auto());
+                    auto colName = ColumnDefinition{};
+                    colName.Width(GridLengthHelper::FromValueAndType(1.0, GridUnitType::Star));
+                    auto colStatus = ColumnDefinition{};
+                    colStatus.Width(GridLengthHelper::FromValueAndType(130, GridUnitType::Pixel));
+                    auto colActions = ColumnDefinition{};
+                    colActions.Width(GridLengthHelper::Auto());
+                    row.ColumnDefinitions().Append(colIcon);
+                    row.ColumnDefinitions().Append(colName);
+                    row.ColumnDefinitions().Append(colStatus);
+                    row.ColumnDefinitions().Append(colActions);
+
+                    // Icon cell: initial letter underneath, jar icon painted
+                    // on top once extracted (a failed load just shows the
+                    // letter, so rows never look broken).
+                    Grid cell{};
+                    cell.Width(36);
+                    cell.Height(36);
+                    cell.VerticalAlignment(VerticalAlignment::Center);
+                    hstring baseName = !meta.name.empty() ? meta.name :
+                        hstring{ p.stem().wstring() };
+                    wchar_t initialCh = L'?';
+                    if (!baseName.empty())
+                    {
+                        try
+                        {
+                            initialCh = static_cast<wchar_t>(
+                                towupper(std::wstring{ baseName }[0]));
+                        }
+                        catch (...)
+                        {
+                        }
+                    }
+                    TextBlock letter{};
+                    letter.Text(hstring{ std::wstring(1, initialCh) });
+                    letter.HorizontalAlignment(HorizontalAlignment::Center);
+                    letter.VerticalAlignment(VerticalAlignment::Center);
+                    letter.FontSize(16);
+                    letter.FontWeight(Windows::UI::Text::FontWeights::Bold());
+                    letter.Opacity(0.6);
+                    cell.Children().Append(letter);
+                    Image icon{};
+                    icon.Width(32);
+                    icon.Height(32);
+                    icon.HorizontalAlignment(HorizontalAlignment::Center);
+                    icon.VerticalAlignment(VerticalAlignment::Center);
+                    icon.Stretch(Stretch::Uniform);
+                    cell.Children().Append(icon);
+                    Grid::SetColumn(cell, 0);
+                    row.Children().Append(cell);
+
+                    StackPanel nameStack{};
+                    nameStack.Orientation(Orientation::Horizontal);
+                    nameStack.Spacing(6);
+                    nameStack.VerticalAlignment(VerticalAlignment::Center);
                     TextBlock t{};
-                    t.Text(hstring{ p.filename().wstring() });
-                    t.Style(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>());
+                    t.Text(!meta.name.empty() ? meta.name : hstring{ p.filename().wstring() });
+                    t.FontWeight(Windows::UI::Text::FontWeights::SemiBold());
                     t.VerticalAlignment(VerticalAlignment::Center);
-                    t.MaxWidth(340);
                     t.TextTrimming(TextTrimming::CharacterEllipsis);
-                    row.Children().Append(t);
+                    nameStack.Children().Append(t);
+                    TextBlock v{};
+                    v.Style(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>());
+                    v.Opacity(0.6);
+                    v.VerticalAlignment(VerticalAlignment::Center);
+                    v.Text(meta.version);
+                    nameStack.Children().Append(v);
+                    hstring tip = hstring{ p.filename().wstring() };
+                    if (!meta.modId.empty())
+                        tip = hstring{ L"Modrinth id: " } + meta.modId + L"\n" + tip;
+                    ToolTipService::SetToolTip(nameStack, box_value(tip));
+                    Grid::SetColumn(nameStack, 1);
+                    row.Children().Append(nameStack);
 
                     TextBlock st{};
                     st.Style(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>());
                     st.Opacity(0.7);
-                    st.Width(190);
+                    st.Width(130);
                     st.VerticalAlignment(VerticalAlignment::Center);
+                    st.TextTrimming(TextTrimming::CharacterEllipsis);
                     st.Text(enabled ? L"" : L"disabled");
+                    Grid::SetColumn(st, 2);
                     row.Children().Append(st);
 
                     StackPanel actions{};
                     actions.Orientation(Orientation::Horizontal);
                     actions.Spacing(6);
                     actions.VerticalAlignment(VerticalAlignment::Center);
+                    Grid::SetColumn(actions, 3);
                     row.Children().Append(actions);
 
                     ModRow state{};
                     state.file = p;
                     state.enabled = enabled;
+                    state.name = t;
+                    state.version = v;
                     state.status = st;
                     state.actions = actions;
+                    state.icon = icon;
+                    state.meta = meta;
 
                     Button toggle{};
                     toggle.Content(box_value(enabled ? L"Disable" : L"Enable"));
@@ -975,6 +1220,10 @@ namespace winrt::PretClient
 
                     list.Children().Append(row);
                     rows->push_back(state);
+                    if (meta.modId.empty() && meta.name.empty())
+                        EnsureModMeta(p, metaCache, rows, queue);
+                    else if (!meta.icon.empty())
+                        EnsureModIcon(p, meta.icon, icon, queue);
                     if (++count >= 60)
                         break;
                 }
@@ -1030,9 +1279,12 @@ namespace winrt::PretClient
         dialog.Title(box_value(hstring{ L"Mods - " } + instName));
         dialog.Content(panel);
         dialog.CloseButtonText(L"Close");
+        dialog.MinWidth(700);
         dialog.XamlRoot(m_root.XamlRoot());
         co_await dialog.ShowAsync();
     }
+
+    fire_and_forget InstancesPage::AddDialog()
 
     hstring InstancesPage::TailText(std::filesystem::path const& file)
     {
