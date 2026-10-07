@@ -525,7 +525,7 @@ namespace winrt::PretClient::Downloader
             {
                 log(L"Fabric API...");
                 hstring msg = co_await Modrinth::EnsureFabricApiAsync(
-                    std::filesystem::path{ game.gameDir }.wstring(), vanillaId);
+                    std::filesystem::path{ std::wstring{ game.gameDir } }.wstring(), vanillaId);
                 log(hstring{ L"  " } + msg);
             }
 
