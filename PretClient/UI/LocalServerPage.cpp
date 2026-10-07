@@ -1187,7 +1187,7 @@ namespace winrt::PretClient
                     try
                 {
                     if (m_dScroll)
-                        m_dScroll.ScrollToEnd();
+                        m_dScroll.ScrollToVerticalOffset(m_dScroll.ScrollableHeight());
                 }
                 catch (...)
                 {
@@ -1339,7 +1339,7 @@ namespace winrt::PretClient
                 try
                 {
                     if (m_dScroll)
-                        m_dScroll.ScrollToEnd();
+                        m_dScroll.ScrollToVerticalOffset(m_dScroll.ScrollableHeight());
                 }
                 catch (...)
                 {
