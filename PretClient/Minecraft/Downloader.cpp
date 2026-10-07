@@ -32,6 +32,16 @@ namespace winrt::PretClient::Downloader
             return hstring{};
         }
 
+        hstring DescribeException(std::exception const& e)
+        {
+            return to_hstring(e.what());
+        }
+
+        hstring DescribeException(...)
+        {
+            return L"unknown error";
+        }
+
         bool FileOk(std::filesystem::path const& p, long long wantSize, hstring const& wantSha1)
         {
             try
@@ -56,9 +66,6 @@ namespace winrt::PretClient::Downloader
             }
         }
 
-        // Download (streamed, with progress) unless present+valid.
-        // Returns empty on success, error text otherwise. quiet skips the
-        // per-file log lines (batched fetches report progress in aggregate).
         IAsyncOperation<hstring> FetchFile(hstring url, std::filesystem::path const& dest,
             long long size, hstring sha1, hstring what, LogFn log, FileProgFn prog,
             bool quiet = false)
@@ -96,17 +103,10 @@ namespace winrt::PretClient::Downloader
             auto has = [&](wchar_t const* t) { return name.find(t) != std::wstring::npos; };
             if (name.find(L"natives") == std::wstring::npos)
                 return false;
-            // x64 build: bare natives-windows (+linux/osx variants are filtered by rules anyway).
             if (has(L"natives-windows-x86") || has(L"natives-windows-arm64"))
                 return false;
             return true;
         }
-
-        // ---- bounded-concurrency fetch batch ---------------------------------
-        // One sequential pass over ~3000 asset objects (or ~200 libraries) is
-        // what made first runs crawl: every file paid a full round trip. A
-        // batch runs several FetchFile coroutines at once; they only suspend
-        // on network I/O and all resume on the calling apartment context.
 
         struct WaitGroup
         {
@@ -125,8 +125,6 @@ namespace winrt::PretClient::Downloader
                 {
                     auto h = waiter;
                     waiter = {};
-                    // Resumes PrepareAsync inline; it must not touch *this
-                    // afterwards (the batch lives in PrepareAsync's frame).
                     h.resume();
                 }
             }
@@ -190,8 +188,6 @@ namespace winrt::PretClient::Downloader
                 if (!prog)
                     return;
                 auto now = std::chrono::steady_clock::now();
-                // Thousands of tiny asset files would otherwise flood the UI
-                // thread with updates; 10/s is plenty smooth.
                 if (!force && lastReport.time_since_epoch().count() != 0 &&
                     std::chrono::duration_cast<std::chrono::milliseconds>(now - lastReport).count() < 100)
                     return;
@@ -219,8 +215,6 @@ namespace winrt::PretClient::Downloader
             }
         }
 
-        // Pulls the next job until the batch is exhausted; the first error
-        // stops this worker (the rest finish their current file).
         fire_and_forget FetchWorker(FetchBatch* b)
         {
             for (;;)
@@ -305,8 +299,6 @@ namespace winrt::PretClient::Downloader
             {
                 Versions::Manifest manifest{};
                 bool haveManifest = false;
-                // Manifest fetch is callback-style; bridge with a shared slot.
-                // (Simplest correct approach: fetch inline via the raw JSON.)
                 auto text = co_await Http::GetStringAsync(
                     L"https://piston-meta.mojang.com/mc/game/version_manifest_v2.json", kUA);
                 auto root = JsonObject::Parse(text);
@@ -343,8 +335,15 @@ namespace winrt::PretClient::Downloader
                 }
                 (void)haveManifest;
             }
+            catch (const std::exception& e)
+            {
+                fail(hstring{ L"Version manifest fetch failed: " } + DescribeException(e));
+                co_return;
+            }
             catch (...)
             {
+                fail(L"Version manifest fetch failed: unknown error");
+                co_return;
             }
             if (entry.url.empty())
             {
@@ -353,18 +352,31 @@ namespace winrt::PretClient::Downloader
             }
 
             log(hstring{ L"Fetching " } + vanillaId + L" package...");
-            auto version = co_await Versions::FetchVersionJsonAsync(entry);
-            if (!version)
+            try
             {
-                fail(L"Version package fetch failed.");
+                auto version = co_await Versions::FetchVersionJsonAsync(entry);
+                if (!version)
+                {
+                    fail(L"Version package fetch failed.");
+                    co_return;
+                }
+                game.versionJson = version;
+            }
+            catch (const std::exception& e)
+            {
+                fail(hstring{ L"Version package fetch failed: " } + DescribeException(e));
                 co_return;
             }
-            game.versionJson = version;
+            catch (...)
+            {
+                fail(L"Version package fetch failed: unknown error");
+                co_return;
+            }
 
             try
             {
-                if (version.HasKey(L"javaVersion"))
-                    game.javaMajor = static_cast<int>(version.GetNamedObject(L"javaVersion").GetNamedNumber(L"majorVersion"));
+                if (game.versionJson.HasKey(L"javaVersion"))
+                    game.javaMajor = static_cast<int>(game.versionJson.GetNamedObject(L"javaVersion").GetNamedNumber(L"majorVersion"));
             }
             catch (...)
             {
@@ -387,7 +399,7 @@ namespace winrt::PretClient::Downloader
             long long clientSize = 0;
             try
             {
-                auto dl = version.GetNamedObject(L"downloads").GetNamedObject(L"client");
+                auto dl = game.versionJson.GetNamedObject(L"downloads").GetNamedObject(L"client");
                 clientUrl = OptStr(dl, L"url");
                 clientSha1 = OptStr(dl, L"sha1");
                 if (dl.HasKey(L"size"))
@@ -412,9 +424,9 @@ namespace winrt::PretClient::Downloader
             libBatch.label = L"libraries";
             libBatch.log = log;
             libBatch.prog = prog;
-            if (version.HasKey(L"libraries"))
+            if (game.versionJson.HasKey(L"libraries"))
             {
-                for (auto const& lv : version.GetNamedArray(L"libraries"))
+                for (auto const& lv : game.versionJson.GetNamedArray(L"libraries"))
                 {
                     if (lv.ValueType() != JsonValueType::Object)
                         continue;
@@ -570,7 +582,7 @@ namespace winrt::PretClient::Downloader
             long long assetSize = 0;
             try
             {
-                auto ai = version.GetNamedObject(L"assetIndex");
+                auto ai = game.versionJson.GetNamedObject(L"assetIndex");
                 assetId = OptStr(ai, L"id");
                 assetUrl = OptStr(ai, L"url");
                 assetSha1 = OptStr(ai, L"sha1");
@@ -632,7 +644,6 @@ namespace winrt::PretClient::Downloader
                     {
                         hstring url = hstring{ L"https://resources.download.minecraft.net/" } +
                             hs.substr(0, 2) + L"/" + hs;
-                        // The object hash is the file's SHA1, so verify it too.
                         assetBatch.Add(url, dest, size, hash,
                             hstring{ L"asset " } + std::wstring{ hash }.substr(0, 8));
                     }
@@ -652,18 +663,23 @@ namespace winrt::PretClient::Downloader
                     }
                 }
             }
+            catch (const std::exception& e)
+            {
+                fail(hstring{ L"Asset index parse failed: " } + DescribeException(e));
+                co_return;
+            }
             catch (...)
             {
-                fail(L"Asset index parse failed.");
+                fail(L"Asset index parse failed: unknown error");
                 co_return;
             }
 
             game.loggingPath = L"";
             try
             {
-                if (version.HasKey(L"logging"))
+                if (game.versionJson.HasKey(L"logging"))
                 {
-                    auto file = version.GetNamedObject(L"logging").GetNamedObject(L"client").GetNamedObject(L"file");
+                    auto file = game.versionJson.GetNamedObject(L"logging").GetNamedObject(L"client").GetNamedObject(L"file");
                     hstring id = OptStr(file, L"id");
                     hstring url = OptStr(file, L"url");
                     hstring sha1 = OptStr(file, L"sha1");
@@ -690,8 +706,6 @@ namespace winrt::PretClient::Downloader
             if (isFabric)
             {
                 log(L"Fabric API...");
-                // Installs into the instance's own mods folder when it has
-                // one; the folder is staged into <gameDir>/mods at launch.
                 std::wstring target = modsDir.empty()
                     ? (std::filesystem::path{ std::wstring{ game.gameDir } } / L"mods").wstring()
                     : modsDir;
@@ -701,9 +715,14 @@ namespace winrt::PretClient::Downloader
 
             log(L"Ready.");
         }
+        catch (const std::exception& e)
+        {
+            fail(hstring{ L"Unexpected prepare failure: " } + DescribeException(e));
+            co_return;
+        }
         catch (...)
         {
-            fail(L"Unexpected prepare failure.");
+            fail(L"Unexpected prepare failure: unknown error");
             co_return;
         }
         done(true, std::move(game), hstring{});
