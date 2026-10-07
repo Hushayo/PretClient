@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "Stats.h"
+#include <algorithm>
 #include <map>
 #include <pdh.h>
 #include <pdhmsg.h>

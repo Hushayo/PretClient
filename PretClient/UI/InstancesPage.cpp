@@ -4,6 +4,7 @@
 #include "../Minecraft/Downloader.h"
 #include "../Minecraft/Fabric.h"
 #include <algorithm>
+#include <fstream>
 #include <shellapi.h>
 #include "../Minecraft/Java.h"
 #include "../Minecraft/Launcher.h"
