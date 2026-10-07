@@ -2,10 +2,8 @@
 #include "Toast.h"
 #include <algorithm>
 #include <winrt/Microsoft.Windows.AppNotifications.h>
-#include <winrt/Windows.Data.Xml.Dom.h>
 
 using namespace winrt;
-using namespace Windows::Data::Xml::Dom;
 using namespace Microsoft::Windows::AppNotifications;
 
 namespace winrt::PretClient::Update::Toast
@@ -36,7 +34,7 @@ namespace winrt::PretClient::Update::Toast
             return s;
         }
 
-        void Show(XmlDocument const& doc)
+        void Show(hstring const& xml)
         {
             try
             {
@@ -48,7 +46,7 @@ namespace winrt::PretClient::Update::Toast
                 catch (...)
                 {
                 }
-                AppNotification toast{ doc };
+                AppNotification toast{ xml };
                 toast.Tag(kTag);
                 toast.Group(kGroup);
                 manager.Show(toast);
@@ -67,21 +65,27 @@ namespace winrt::PretClient::Update::Toast
                 L"<text>" + Escape(std::wstring{ body }) + L"</text>"
                 L"</binding></visual>"
                 L"</toast>";
-            XmlDocument doc{};
-            doc.LoadXml(xml);
-            Show(doc);
+            Show(hstring{ xml });
+        }
+
+        // Progress data takes its (non-zero) sequence number at construction;
+        // the shell keeps the greatest one it has seen.
+        static unsigned int NextSeq()
+        {
+            static unsigned int seq = 0;
+            return ++seq;
         }
 
         void PushProgress(hstring const& status, double value01, hstring const& valueText)
         {
             try
             {
-                AppNotificationProgressData data{};
+                AppNotificationProgressData data{ NextSeq() };
                 data.Title(L"");
                 data.Value((std::max)(0.0, (std::min)(1.0, value01)));
                 data.ValueStringOverride(valueText);
                 data.Status(status);
-                AppNotificationManager::Default().UpdateAsync(kTag, kGroup, data);
+                AppNotificationManager::Default().UpdateAsync(data, kTag, kGroup);
             }
             catch (...)
             {
@@ -125,7 +129,7 @@ namespace winrt::PretClient::Update::Toast
         {
             auto manager = AppNotificationManager::Default();
             manager.NotificationInvoked([onActionCopy = g_onAction](
-                    AppNotificationManager const&, AppNotificationInvokedEventArgs const& args) {
+                    AppNotificationManager const&, AppNotificationActivatedEventArgs const& args) {
                 try
                 {
                     hstring argument;
@@ -178,9 +182,7 @@ namespace winrt::PretClient::Update::Toast
                 L"<action content=\"Release notes\" arguments=\"" + Escape(std::wstring{ notesArg }) + L"\"/>"
                 L"</actions>"
                 L"</toast>";
-            XmlDocument doc{};
-            doc.LoadXml(xml);
-            Show(doc);
+            Show(hstring{ xml });
         }
         catch (...)
         {
@@ -199,9 +201,7 @@ namespace winrt::PretClient::Update::Toast
                 L"<progress title=\"\" value=\"{progressValue}\" valueStringOverride=\"{progressValueString}\" status=\"{progressStatus}\"/>"
                 L"</binding></visual>"
                 L"</toast>";
-            XmlDocument doc{};
-            doc.LoadXml(xml);
-            Show(doc);
+            Show(hstring{ xml });
             PushProgress(L"Starting\u2026", 0.0, L"\u2026");
         }
         catch (...)
