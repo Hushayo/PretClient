@@ -66,4 +66,80 @@ namespace winrt::PretClient::Theme
     {
         return Microsoft::UI::Xaml::Media::SolidColorBrush{ Windows::UI::ColorHelper::FromArgb(0xFF, 0x9A, 0x9A, 0x9A) };
     }
+
+    // Instance-card status colors. One hue per state so Idle / Preparing /
+    // Running read at a glance from the rail, dot, pill and card border.
+    inline Windows::UI::Color RailIdleColor()
+    {
+        return Windows::UI::ColorHelper::FromArgb(0xFF, 0x3D, 0x3D, 0x3D);
+    }
+    inline Windows::UI::Color RailRunningColor()
+    {
+        return Windows::UI::ColorHelper::FromArgb(0xFF, 0x44, 0xBD, 0x32);
+    }
+    inline Windows::UI::Color RailPreparingColor()
+    {
+        return Windows::UI::ColorHelper::FromArgb(0xFF, 0xE0, 0xA6, 0x3C);
+    }
+    inline Microsoft::UI::Xaml::Media::SolidColorBrush RailIdleBrush()
+    {
+        return Microsoft::UI::Xaml::Media::SolidColorBrush{ RailIdleColor() };
+    }
+    inline Microsoft::UI::Xaml::Media::SolidColorBrush RailRunningBrush()
+    {
+        return Microsoft::UI::Xaml::Media::SolidColorBrush{ RailRunningColor() };
+    }
+    inline Microsoft::UI::Xaml::Media::SolidColorBrush RailPreparingBrush()
+    {
+        return Microsoft::UI::Xaml::Media::SolidColorBrush{ RailPreparingColor() };
+    }
+    inline Microsoft::UI::Xaml::Media::SolidColorBrush PillIdleBackground()
+    {
+        return Microsoft::UI::Xaml::Media::SolidColorBrush{ Windows::UI::ColorHelper::FromArgb(0x26, 0x9A, 0x9A, 0x9A) };
+    }
+    inline Microsoft::UI::Xaml::Media::SolidColorBrush PillRunningBackground()
+    {
+        return Microsoft::UI::Xaml::Media::SolidColorBrush{ Windows::UI::ColorHelper::FromArgb(0x2E, 0x44, 0xBD, 0x32) };
+    }
+    inline Microsoft::UI::Xaml::Media::SolidColorBrush PillPreparingBackground()
+    {
+        return Microsoft::UI::Xaml::Media::SolidColorBrush{ Windows::UI::ColorHelper::FromArgb(0x2E, 0xE0, 0xA6, 0x3C) };
+    }
+    inline Microsoft::UI::Xaml::Media::SolidColorBrush PillRunningForeground()
+    {
+        return Microsoft::UI::Xaml::Media::SolidColorBrush{ Windows::UI::ColorHelper::FromArgb(0xFF, 0x8B, 0xE8, 0x8E) };
+    }
+    inline Microsoft::UI::Xaml::Media::SolidColorBrush PillPreparingForeground()
+    {
+        return Microsoft::UI::Xaml::Media::SolidColorBrush{ Windows::UI::ColorHelper::FromArgb(0xFF, 0xF2, 0xC8, 0x7A) };
+    }
+    inline Microsoft::UI::Xaml::Media::SolidColorBrush IconFabricBackground()
+    {
+        return Microsoft::UI::Xaml::Media::SolidColorBrush{ Windows::UI::ColorHelper::FromArgb(0xFF, 0x24, 0x5C, 0x20) };
+    }
+    inline Microsoft::UI::Xaml::Media::SolidColorBrush IconVanillaBackground()
+    {
+        return Microsoft::UI::Xaml::Media::SolidColorBrush{ Windows::UI::ColorHelper::FromArgb(0xFF, 0x38, 0x38, 0x38) };
+    }
+    inline Microsoft::UI::Xaml::Media::SolidColorBrush IconForeground()
+    {
+        return Microsoft::UI::Xaml::Media::SolidColorBrush{ Windows::UI::ColorHelper::FromArgb(0xFF, 0xF2, 0xF2, 0xF2) };
+    }
+    inline Microsoft::UI::Xaml::Media::Brush SubtleFillBrush()
+    {
+        using namespace Microsoft::UI::Xaml;
+        try
+        {
+            if (auto v = Application::Current().Resources().Lookup(winrt::box_value(L"CardBackgroundFillColorSecondaryBrush")))
+                return v.as<Media::Brush>();
+        }
+        catch (...)
+        {
+        }
+        return Media::SolidColorBrush{ Windows::UI::ColorHelper::FromArgb(0xFF, 0x24, 0x24, 0x24) };
+    }
+    inline Microsoft::UI::Xaml::Media::SolidColorBrush LogBackgroundBrush()
+    {
+        return Microsoft::UI::Xaml::Media::SolidColorBrush{ Windows::UI::ColorHelper::FromArgb(0xFF, 0x1B, 0x1D, 0x1B) };
+    }
 }

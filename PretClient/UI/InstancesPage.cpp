@@ -177,15 +177,61 @@ namespace winrt::PretClient
             bool isFabric = (inst.loader == L"fabric");
             bool preparing = m_preparing.find(std::wstring{ inst.id }) != m_preparing.end();
 
+            // Status-driven accent so cards read at a glance.
+            Microsoft::UI::Xaml::Media::SolidColorBrush railBrush = Theme::RailIdleBrush();
+            Microsoft::UI::Xaml::Media::SolidColorBrush pillBg = Theme::PillIdleBackground();
+            Microsoft::UI::Xaml::Media::Brush pillFg = Theme::DimBrush().as<Microsoft::UI::Xaml::Media::Brush>();
+            Microsoft::UI::Xaml::Media::Brush frameStroke = Theme::CardStroke();
+            hstring stateText = L"Idle";
+            if (running)
+            {
+                railBrush = Theme::RailRunningBrush();
+                pillBg = Theme::PillRunningBackground();
+                pillFg = Theme::PillRunningForeground().as<Microsoft::UI::Xaml::Media::Brush>();
+                frameStroke = Microsoft::UI::Xaml::Media::SolidColorBrush{
+                    Windows::UI::ColorHelper::FromArgb(110, 0x44, 0xBD, 0x32)
+                }.as<Microsoft::UI::Xaml::Media::Brush>();
+                stateText = L"Running";
+            }
+            else if (preparing)
+            {
+                railBrush = Theme::RailPreparingBrush();
+                pillBg = Theme::PillPreparingBackground();
+                pillFg = Theme::PillPreparingForeground().as<Microsoft::UI::Xaml::Media::Brush>();
+                frameStroke = Microsoft::UI::Xaml::Media::SolidColorBrush{
+                    Windows::UI::ColorHelper::FromArgb(110, 0xE0, 0xA6, 0x3C)
+                }.as<Microsoft::UI::Xaml::Media::Brush>();
+                stateText = L"Preparing";
+            }
+
             Border card{};
             card.Background(Theme::CardBrush());
-            card.BorderBrush(Theme::CardStroke());
+            card.BorderBrush(frameStroke);
             card.BorderThickness(ThicknessHelper::FromUniformLength(1));
-            card.CornerRadius(CornerRadiusHelper::FromUniformRadius(8));
-            card.Padding(ThicknessHelper::FromUniformLength(16));
+            card.CornerRadius(CornerRadiusHelper::FromUniformRadius(12));
+            card.Padding(ThicknessHelper::FromUniformLength(0));
+
+            // Left status rail + padded content.
+            Grid shell{};
+            shell.ColumnDefinitions().Append(ColumnDefinition{});
+            shell.ColumnDefinitions().Append(ColumnDefinition{});
+            shell.ColumnDefinitions().GetAt(0).Width(GridLengthHelper::Auto());
+            shell.ColumnDefinitions().GetAt(1).Width(GridLengthHelper::FromValueAndType(1.0, GridUnitType::Star));
+
+            Border rail{};
+            rail.Width(5);
+            rail.Background(railBrush);
+            rail.VerticalAlignment(VerticalAlignment::Stretch);
+            rail.HorizontalAlignment(HorizontalAlignment::Left);
+            rail.CornerRadius(Microsoft::UI::Xaml::CornerRadius{ 12, 0, 0, 12 });
+            Grid::SetColumn(rail, 0);
+            shell.Children().Append(rail);
 
             StackPanel body{};
-            body.Spacing(8);
+            body.Spacing(10);
+            body.Padding(ThicknessHelper::FromUniformLength(16));
+            Grid::SetColumn(body, 1);
+            shell.Children().Append(body);
 
             Grid head{};
             head.ColumnSpacing(16);
@@ -194,21 +240,65 @@ namespace winrt::PretClient
             head.ColumnDefinitions().GetAt(0).Width(GridLengthHelper::FromValueAndType(1.0, GridUnitType::Star));
             head.ColumnDefinitions().GetAt(1).Width(GridLengthHelper::Auto());
 
-            StackPanel title{};
-            title.Orientation(Orientation::Horizontal);
-            title.Spacing(8);
+            // Identity: game-icon tile + name stack.
+            StackPanel identity{};
+            identity.Orientation(Orientation::Horizontal);
+            identity.Spacing(12);
+            identity.VerticalAlignment(VerticalAlignment::Center);
+
+            Border icon{};
+            icon.Width(46);
+            icon.Height(46);
+            icon.CornerRadius(CornerRadiusHelper::FromUniformRadius(11));
+            icon.BorderBrush(Theme::CardStroke());
+            icon.BorderThickness(ThicknessHelper::FromUniformLength(1));
+            icon.VerticalAlignment(VerticalAlignment::Center);
+            icon.Background(isFabric ? Theme::IconFabricBackground().as<Microsoft::UI::Xaml::Media::Brush>()
+                                     : Theme::IconVanillaBackground().as<Microsoft::UI::Xaml::Media::Brush>());
+            wchar_t initialCh = L'?';
+            try
+            {
+                std::wstring nm{ inst.name };
+                if (!nm.empty())
+                    initialCh = static_cast<wchar_t>(towupper(nm[0]));
+            }
+            catch (...)
+            {
+            }
+            TextBlock initial{};
+            initial.Text(hstring{ std::wstring(1, initialCh) });
+            initial.HorizontalAlignment(HorizontalAlignment::Center);
+            initial.VerticalAlignment(VerticalAlignment::Center);
+            initial.FontSize(20);
+            initial.FontWeight(Windows::UI::Text::FontWeights::Bold());
+            initial.Foreground(Theme::IconForeground());
+            icon.Child(initial);
+            identity.Children().Append(icon);
+
+            StackPanel nameCol{};
+            nameCol.Orientation(Orientation::Vertical);
+            nameCol.Spacing(5);
+            nameCol.VerticalAlignment(VerticalAlignment::Center);
+
+            StackPanel nameRow{};
+            nameRow.Orientation(Orientation::Horizontal);
+            nameRow.Spacing(8);
+            nameRow.VerticalAlignment(VerticalAlignment::Center);
 
             TextBlock name{};
             name.Text(inst.name);
             name.Style(Application::Current().Resources().Lookup(box_value(L"SubtitleTextBlockStyle")).as<Style>());
+            name.FontWeight(Windows::UI::Text::FontWeights::SemiBold());
             name.VerticalAlignment(VerticalAlignment::Center);
-            title.Children().Append(name);
+            nameRow.Children().Append(name);
 
             Border badge{};
-            badge.CornerRadius(CornerRadiusHelper::FromUniformRadius(4));
-            badge.Padding(ThicknessHelper::FromLengths(8, 4, 8, 4));
+            badge.CornerRadius(CornerRadiusHelper::FromUniformRadius(6));
+            badge.Padding(ThicknessHelper::FromLengths(8, 3, 8, 3));
             badge.VerticalAlignment(VerticalAlignment::Center);
             TextBlock badgeText{};
+            badgeText.FontSize(11);
+            badgeText.FontWeight(Windows::UI::Text::FontWeights::Bold());
             if (isFabric)
             {
                 badge.Background(SolidColorBrush{ Windows::UI::ColorHelper::FromArgb(38, 0x44, 0xBD, 0x32) });
@@ -225,26 +315,71 @@ namespace winrt::PretClient
                 badgeText.Text(L"VANILLA");
             }
             badge.Child(badgeText);
-            title.Children().Append(badge);
+            nameRow.Children().Append(badge);
 
             TextBlock ver{};
-            ver.Text(inst.mcVersion);
+            ver.Style(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>());
+            ver.Text(hstring{ L"MC " } + inst.mcVersion);
             ver.VerticalAlignment(VerticalAlignment::Center);
-            ver.Opacity(0.8);
-            title.Children().Append(ver);
-            Grid::SetColumn(title, 0);
-            head.Children().Append(title);
+            ver.Opacity(0.75);
+            nameRow.Children().Append(ver);
+            nameCol.Children().Append(nameRow);
+
+            // Status pill + live details.
+            StackPanel metaRow{};
+            metaRow.Orientation(Orientation::Horizontal);
+            metaRow.Spacing(8);
+            metaRow.VerticalAlignment(VerticalAlignment::Center);
+
+            Border pill{};
+            pill.CornerRadius(CornerRadiusHelper::FromUniformRadius(10));
+            pill.Padding(ThicknessHelper::FromLengths(10, 4, 10, 4));
+            pill.Background(pillBg);
+            pill.VerticalAlignment(VerticalAlignment::Center);
+            StackPanel pillInner{};
+            pillInner.Orientation(Orientation::Horizontal);
+            pillInner.Spacing(6);
+            pillInner.VerticalAlignment(VerticalAlignment::Center);
+            Microsoft::UI::Xaml::Shapes::Ellipse dot{};
+            dot.Width(8);
+            dot.Height(8);
+            dot.Fill(railBrush);
+            dot.VerticalAlignment(VerticalAlignment::Center);
+            pillInner.Children().Append(dot);
+            TextBlock stateLabel{};
+            stateLabel.Style(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>());
+            stateLabel.Text(stateText);
+            stateLabel.Foreground(pillFg);
+            stateLabel.VerticalAlignment(VerticalAlignment::Center);
+            pillInner.Children().Append(stateLabel);
+            pill.Child(pillInner);
+            metaRow.Children().Append(pill);
 
             TextBlock stats{};
             stats.Style(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>());
-            stats.Opacity(0.7);
-            stats.Text(running ? L"* starting..." : L"Idle");
+            stats.Opacity(0.65);
+            stats.VerticalAlignment(VerticalAlignment::Center);
+            stats.TextTrimming(TextTrimming::CharacterEllipsis);
+            if (running)
+                stats.Text(L"Starting game...");
+            else if (preparing)
+                stats.Text(L"Downloading game files...");
+            else
+                stats.Text(L"Ready to play");
+            metaRow.Children().Append(stats);
+            nameCol.Children().Append(metaRow);
+
+            identity.Children().Append(nameCol);
+            Grid::SetColumn(identity, 0);
+            head.Children().Append(identity);
+
             body.Children().Append(head);
-            body.Children().Append(stats);
 
             ProgressBar prog{};
             prog.Minimum(0);
             prog.Maximum(100);
+            prog.Height(6);
+            prog.CornerRadius(CornerRadiusHelper::FromUniformRadius(3));
             prog.Visibility(Visibility::Collapsed);
             body.Children().Append(prog);
 
@@ -262,17 +397,29 @@ namespace winrt::PretClient
             gamelog.MinHeight(120);
             gamelog.MaxHeight(220);
             gamelog.FontFamily(FontFamily(L"Consolas"));
+            gamelog.FontSize(12);
+            gamelog.Background(Theme::LogBackgroundBrush());
+            gamelog.BorderBrush(Theme::CardStroke());
+            gamelog.CornerRadius(CornerRadiusHelper::FromUniformRadius(8));
+            gamelog.Padding(ThicknessHelper::FromUniformLength(8));
             gamelog.Visibility(running ? Visibility::Visible : Visibility::Collapsed);
             gamelog.Header(box_value(L"Client log"));
             body.Children().Append(gamelog);
 
             if (isFabric)
             {
+                Border infoBar{};
+                infoBar.Background(Theme::PillRunningBackground());
+                infoBar.CornerRadius(CornerRadiusHelper::FromUniformRadius(8));
+                infoBar.Padding(ThicknessHelper::FromLengths(10, 8, 10, 8));
                 TextBlock note{};
                 note.Style(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>());
-                note.Opacity(0.6);
-                note.Text(L"Fabric loader + Fabric API install automatically on Play.");
-                body.Children().Append(note);
+                note.Foreground(Theme::GoodBrush());
+                note.Opacity(0.9);
+                note.TextWrapping(TextWrapping::Wrap);
+                note.Text(L"\u2139 Fabric loader + Fabric API install automatically on Play.");
+                infoBar.Child(note);
+                body.Children().Append(infoBar);
             }
 
             StackPanel buttons{};
@@ -282,13 +429,14 @@ namespace winrt::PretClient
 
             hstring id = inst.id;
             Button play{};
-            play.Content(box_value(L"Play"));
+            play.Content(box_value(running ? L"\u25B6 Playing" : L"\u25B6 Play"));
             play.Style(Application::Current().Resources().Lookup(box_value(L"AccentButtonStyle")).as<Style>());
+            play.MinWidth(88);
             play.IsEnabled(!running && !preparing);
             play.Click([this, id](IInspectable const&, RoutedEventArgs const&) { PlayInstance(id); });
 
             Button stop{};
-            stop.Content(box_value(L"Stop"));
+            stop.Content(box_value(L"\u25A0 Stop"));
             stop.IsEnabled(running);
             stop.Click([this, id](IInspectable const&, RoutedEventArgs const&) {
                 Launcher::Stop(id);
@@ -297,7 +445,7 @@ namespace winrt::PretClient
             });
 
             Button restart{};
-            restart.Content(box_value(L"Restart"));
+            restart.Content(box_value(L"\u21BB Restart"));
             restart.IsEnabled(running && !preparing);
             restart.Click([this, id](IInspectable const&, RoutedEventArgs const&) {
                 Launcher::Stop(id);
@@ -337,11 +485,16 @@ namespace winrt::PretClient
             Grid::SetColumn(buttons, 1);
             head.Children().Append(buttons);
 
-            card.Child(body);
+            shell.Children().Append(body);
+            card.Child(shell);
             m_cards.Children().Append(card);
 
             Card c{};
             c.id = id;
+            c.frame = card;
+            c.rail = rail;
+            c.dot = dot;
+            c.stateLabel = stateLabel;
             c.stats = stats;
             c.play = play;
             c.stop = stop;
@@ -904,8 +1057,13 @@ namespace winrt::PretClient
         {
             // Snapshot on the UI thread: Refresh() mutates this list here.
             std::vector<hstring> ids;
+            std::vector<bool> preparingSnap;
             for (auto const& card : m_cardList)
+            {
                 ids.push_back(card.id);
+                preparingSnap.push_back(
+                    m_preparing.find(std::wstring{ card.id }) != m_preparing.end());
+            }
             auto logFile = std::filesystem::path{ std::wstring{ EffectiveGameDir(LoadSettings()) } } /
                 L"logs-pretclient" / L"latest.txt";
 
@@ -943,17 +1101,60 @@ namespace winrt::PretClient
             }
 
             co_await ForegroundAwait{ m_dispatcher };
-            for (auto const& r : rows)
+            for (size_t i = 0; i < rows.size(); ++i)
             {
+                auto const& r = rows[i];
+                bool preparing = i < preparingSnap.size() ? preparingSnap[i] : false;
+                // A download still in flight also counts as preparing, even if
+                // the set was cleared between snapshot and paint.
+                if (!preparing && m_downloads.find(std::wstring{ r.id }) != m_downloads.end() && !r.running)
+                    preparing = true;
                 auto* card = FindCard(r.id);
                 if (!card)
                     continue;
+                auto paintState = [&](bool isRunning, bool isPreparing) {
+                    if (!card->rail || !card->dot || !card->stateLabel || !card->frame)
+                        return;
+                    if (isRunning)
+                    {
+                        card->rail.Background(Theme::RailRunningBrush());
+                        card->dot.Fill(Theme::RailRunningBrush());
+                        card->stateLabel.Text(L"Running");
+                        card->stateLabel.Foreground(Theme::PillRunningForeground());
+                        card->frame.BorderBrush(Microsoft::UI::Xaml::Media::SolidColorBrush{
+                            Windows::UI::ColorHelper::FromArgb(110, 0x44, 0xBD, 0x32) });
+                    }
+                    else if (isPreparing)
+                    {
+                        card->rail.Background(Theme::RailPreparingBrush());
+                        card->dot.Fill(Theme::RailPreparingBrush());
+                        card->stateLabel.Text(L"Preparing");
+                        card->stateLabel.Foreground(Theme::PillPreparingForeground());
+                        card->frame.BorderBrush(Microsoft::UI::Xaml::Media::SolidColorBrush{
+                            Windows::UI::ColorHelper::FromArgb(110, 0xE0, 0xA6, 0x3C) });
+                    }
+                    else
+                    {
+                        card->rail.Background(Theme::RailIdleBrush());
+                        card->dot.Fill(Theme::RailIdleBrush());
+                        card->stateLabel.Text(L"Idle");
+                        card->stateLabel.Foreground(Theme::DimBrush());
+                        card->frame.BorderBrush(Theme::CardStroke());
+                    }
+                };
                 if (!r.running)
                 {
-                    card->stats.Text(L"Idle");
-                    card->gamelog.Visibility(Visibility::Collapsed);
+                    paintState(false, preparing);
+                    if (preparing)
+                        card->stats.Text(L"Downloading game files...");
+                    else
+                        card->stats.Text(L"Ready to play");
+                    // Keep a preparing bar visible; hide the log when idle.
+                    if (!preparing)
+                        card->gamelog.Visibility(Visibility::Collapsed);
                     continue;
                 }
+                paintState(true, false);
                 wchar_t buf[192]{};
                 swprintf_s(buf, L"pid %lu | CPU %s | RAM %s | GPU %s",
                     r.pid,
@@ -1019,6 +1220,17 @@ namespace winrt::PretClient
             card->prog.IsIndeterminate(true);
             card->progText.Visibility(Visibility::Visible);
             card->progText.Text(L"Starting...");
+            if (card->rail && card->dot && card->stateLabel && card->frame)
+            {
+                card->rail.Background(Theme::RailPreparingBrush());
+                card->dot.Fill(Theme::RailPreparingBrush());
+                card->stateLabel.Text(L"Preparing");
+                card->stateLabel.Foreground(Theme::PillPreparingForeground());
+                card->frame.BorderBrush(Microsoft::UI::Xaml::Media::SolidColorBrush{
+                    Windows::UI::ColorHelper::FromArgb(110, 0xE0, 0xA6, 0x3C) });
+            }
+            card->stats.Text(L"Downloading game files...");
+            card->play.IsEnabled(false);
         }
 
         auto fail = [this, id](hstring const& msg) {

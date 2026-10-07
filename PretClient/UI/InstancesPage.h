@@ -43,6 +43,10 @@ namespace winrt::PretClient
         struct Card
         {
             hstring id{};
+            Microsoft::UI::Xaml::Controls::Border frame{ nullptr };
+            Microsoft::UI::Xaml::Controls::Border rail{ nullptr };
+            Microsoft::UI::Xaml::Shapes::Ellipse dot{ nullptr };
+            Microsoft::UI::Xaml::Controls::TextBlock stateLabel{ nullptr };
             Microsoft::UI::Xaml::Controls::TextBlock stats{};
             Microsoft::UI::Xaml::Controls::Button play{};
             Microsoft::UI::Xaml::Controls::Button stop{};

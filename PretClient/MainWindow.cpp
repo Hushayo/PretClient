@@ -146,6 +146,7 @@ namespace winrt::PretClient
         Content(root);
         nav.SelectedItem(m_navInstances);
 
+        m_settings.OnCheckUpdates([this] { CheckForUpdates(); });
         CheckForUpdates();
     }
 
@@ -207,7 +208,10 @@ namespace winrt::PretClient
     {
         JsonObject release = co_await Update::GetLatestReleaseAsync();
         if (!release)
+        {
+            m_settings.SetStatus(L"Could not check for updates (offline?).");
             co_return;
+        }
         hstring latest = release.GetNamedString(L"tag_name", L"");
         hstring current = Update::CurrentVersionTag();
         if (!latest.empty() && Update::IsNewerTag(current, latest))
@@ -219,6 +223,10 @@ namespace winrt::PretClient
                 m_updateUrl = Update::DownloadUrlFor(release);
             m_updateText.Text(L"Update available: " + current + L" -> " + latest);
             m_banner.Visibility(Visibility::Visible);
+        }
+        else
+        {
+            m_settings.SetStatus(L"PretClient " + current + L" is up to date.");
         }
     }
 

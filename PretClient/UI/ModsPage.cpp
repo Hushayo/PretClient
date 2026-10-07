@@ -4,6 +4,7 @@
 #include "../Settings.h"
 #include "../Paths.h"
 #include "../Minecraft/Http.h"
+#include <chrono>
 #include <cwctype>
 #include <winrt/Microsoft.UI.Xaml.Media.Imaging.h>
 
@@ -41,7 +42,11 @@ namespace winrt::PretClient
         m_loader.SelectedIndex(1);
         row.Children().Append(m_loader);
 
-        m_mc.PlaceholderText(L"MC (e.g. 1.20.1)");
+        // MC version is automatic from the target instance (read-only): the
+        // list only ever shows mods matching that version.
+        m_mc.PlaceholderText(L"Auto (instance)");
+        m_mc.IsReadOnly(true);
+        m_mc.IsEnabled(false);
         m_mc.Width(140);
         row.Children().Append(m_mc);
 
@@ -83,17 +88,151 @@ namespace winrt::PretClient
         m_results.Spacing(8);
         m_root.Children().Append(m_scroll);
 
+        // Live search: typing filters without needing the Search button.
+        m_query.TextChanged([this](IInspectable const&, TextBoxTextChangedEventArgs const&) {
+            if (m_syncing)
+                return;
+            ScheduleSearch();
+        });
+        m_loader.SelectionChanged([this](IInspectable const&, SelectionChangedEventArgs const&) {
+            if (m_syncing)
+                return;
+            OnSearch();
+        });
+        m_target.SelectionChanged([this](IInspectable const&, SelectionChangedEventArgs const&) {
+            if (m_syncing)
+                return;
+            SyncFiltersFromTarget();
+            OnSearch();
+        });
+
+        try
+        {
+            m_debounce = Microsoft::UI::Dispatching::DispatcherQueue::GetForCurrentThread().CreateTimer();
+            m_debounce.Interval(std::chrono::milliseconds{ 400 });
+            m_debounce.Tick([this](auto&&, auto&&) {
+                try
+                {
+                    m_debounce.Stop();
+                }
+                catch (...)
+                {
+                }
+                OnSearch();
+            });
+        }
+        catch (...)
+        {
+        }
+
         RefreshInstances();
+    }
+
+    void ModsPage::ScheduleSearch()
+    {
+        try
+        {
+            if (m_debounce)
+            {
+                m_debounce.Stop();
+                m_debounce.Start();
+                return;
+            }
+        }
+        catch (...)
+        {
+        }
+        OnSearch();
+    }
+
+    void ModsPage::SyncFiltersFromTarget()
+    {
+        m_syncing = true;
+        try
+        {
+            if (m_targets.empty() || m_target.SelectedIndex() < 0 ||
+                static_cast<size_t>(m_target.SelectedIndex()) >= m_targets.size())
+            {
+                m_mc.Text(L"");
+                m_loader.IsEnabled(true);
+                m_syncing = false;
+                return;
+            }
+            auto const& inst = m_targets[static_cast<size_t>(m_target.SelectedIndex())];
+            m_mc.Text(inst.mcVersion);
+            if (inst.loader == L"vanilla")
+            {
+                // No loader on the instance: let the user browse any loader.
+                m_loader.IsEnabled(true);
+                if (m_loader.SelectedIndex() < 0)
+                    m_loader.SelectedIndex(0);
+            }
+            else
+            {
+                // Lock the loader filter to the instance loader so only
+                // matching mods are listed.
+                bool found = false;
+                for (uint32_t i = 0; i < m_loader.Items().Size(); ++i)
+                {
+                    if (unbox_value_or<hstring>(m_loader.Items().GetAt(i), L"") == inst.loader)
+                    {
+                        m_loader.SelectedIndex(i);
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found)
+                    m_loader.SelectedIndex(0);
+                m_loader.IsEnabled(false);
+            }
+        }
+        catch (...)
+        {
+        }
+        m_syncing = false;
     }
 
     void ModsPage::RefreshInstances()
     {
+        hstring keepId{};
+        try
+        {
+            if (!m_targets.empty() && m_target.SelectedIndex() >= 0 &&
+                static_cast<size_t>(m_target.SelectedIndex()) < m_targets.size())
+                keepId = m_targets[static_cast<size_t>(m_target.SelectedIndex())].id;
+        }
+        catch (...)
+        {
+        }
         m_targets = LoadInstances();
-        m_target.Items().Clear();
-        for (auto const& i : m_targets)
-            m_target.Items().Append(box_value(i.name + L" (" + i.mcVersion + L" " + i.loader + L")"));
-        if (!m_targets.empty())
-            m_target.SelectedIndex(0);
+        m_syncing = true;
+        try
+        {
+            m_target.Items().Clear();
+            for (auto const& i : m_targets)
+                m_target.Items().Append(box_value(i.name + L" (" + i.mcVersion + L" " + i.loader + L")"));
+            int pick = 0;
+            if (!keepId.empty())
+            {
+                for (size_t i = 0; i < m_targets.size(); ++i)
+                {
+                    if (m_targets[i].id == keepId)
+                    {
+                        pick = static_cast<int>(i);
+                        break;
+                    }
+                }
+            }
+            if (!m_targets.empty())
+                m_target.SelectedIndex(pick);
+        }
+        catch (...)
+        {
+        }
+        m_syncing = false;
+        SyncFiltersFromTarget();
+        // Auto-load: opening the Mods tab shows matching mods immediately.
+        OnSearch();
     }
 
     void ModsPage::SetStatus(hstring const& line)
@@ -103,12 +242,30 @@ namespace winrt::PretClient
 
     fire_and_forget ModsPage::OnSearch()
     {
+        ++m_searchGen;
         m_lastQuery = m_query.Text();
-        m_lastMc = m_mc.Text();
-        m_lastLoader = unbox_value_or<hstring>(m_loader.SelectedItem(), L"fabric");
+        // Filters always come from the target instance so mismatched
+        // versions never list. Vanilla instances have no loader, so fall
+        // back to the (user-pickable) loader box; modded instances lock it.
+        if (!m_targets.empty() && m_target.SelectedIndex() >= 0 &&
+            static_cast<size_t>(m_target.SelectedIndex()) < m_targets.size())
+        {
+            auto const& inst = m_targets[static_cast<size_t>(m_target.SelectedIndex())];
+            m_lastMc = inst.mcVersion;
+            if (inst.loader == L"vanilla")
+                m_lastLoader = unbox_value_or<hstring>(m_loader.SelectedItem(), L"all");
+            else
+                m_lastLoader = inst.loader;
+        }
+        else
+        {
+            m_lastMc = m_mc.Text();
+            m_lastLoader = unbox_value_or<hstring>(m_loader.SelectedItem(), L"fabric");
+        }
         m_offset = 0;
         m_total = 0;
         m_results.Children().Clear();
+        m_loading = false; // abandon any in-flight page; its callback is stale
         FetchPage();
         co_return;
     }
@@ -118,10 +275,13 @@ namespace winrt::PretClient
         if (m_loading)
             return;
         m_loading = true;
+        int gen = m_searchGen;
         SetStatus(L"Searching Modrinth...");
         Modrinth::SearchAsync(
             m_lastQuery, m_lastMc, m_lastLoader, m_offset,
-            [this](Modrinth::SearchResult result) {
+            [this, gen](Modrinth::SearchResult result) {
+                if (gen != m_searchGen)
+                    return; // superseded by a newer search; keep new state
                 m_loading = false;
                 if (result.hits.empty() && m_offset == 0)
                 {
@@ -130,11 +290,14 @@ namespace winrt::PretClient
                 }
                 m_total = result.total;
                 m_offset += static_cast<int>(result.hits.size());
-                wchar_t buf[128]{};
+                wchar_t buf[256]{};
+                std::wstring filter{ m_lastMc.empty() ? L"" : L" for " + std::wstring{ m_lastMc } };
+                if (!m_lastLoader.empty() && m_lastLoader != L"all")
+                    filter += L" " + std::wstring{ m_lastLoader };
                 if (m_total > 0)
-                    swprintf_s(buf, L"%d of %lld results (scroll for more).", m_offset, m_total);
+                    swprintf_s(buf, L"%d of %lld results%s (scroll for more).", m_offset, m_total, filter.c_str());
                 else
-                    swprintf_s(buf, L"%d result(s).", m_offset);
+                    swprintf_s(buf, L"%d result(s)%s.", m_offset, filter.c_str());
                 SetStatus(buf);
                 for (auto const& hit : result.hits)
                 {
@@ -251,8 +414,18 @@ namespace winrt::PretClient
 
     fire_and_forget ModsPage::BuildsDialog(Modrinth::ModHit hit)
     {
-        hstring mc = m_mc.Text();
-        hstring loader = unbox_value_or<hstring>(m_loader.SelectedItem(), L"fabric");
+        // Same instance-locked filter as the list: only builds matching the
+        // target instance version/loader are offered.
+        hstring mc = m_lastMc;
+        hstring loader = m_lastLoader;
+        if (!m_targets.empty() && m_target.SelectedIndex() >= 0 &&
+            static_cast<size_t>(m_target.SelectedIndex()) < m_targets.size())
+        {
+            auto const& inst = m_targets[static_cast<size_t>(m_target.SelectedIndex())];
+            mc = inst.mcVersion;
+            if (inst.loader != L"vanilla")
+                loader = inst.loader;
+        }
         if (loader == L"all")
             loader = L"";
 
@@ -273,15 +446,12 @@ namespace winrt::PretClient
         dialog.XamlRoot(m_root.XamlRoot());
 
         std::wstring modsDir;
-        if (!m_targets.empty() && m_target.SelectedIndex() >= 0)
+        if (!m_targets.empty() && m_target.SelectedIndex() >= 0 &&
+            static_cast<size_t>(m_target.SelectedIndex()) < m_targets.size())
         {
             auto inst = m_targets[static_cast<size_t>(m_target.SelectedIndex())];
             auto settings = LoadSettings();
             modsDir = InstanceModsDir(settings, inst.id).wstring();
-            if (loader.empty() && inst.loader != L"vanilla")
-                loader = inst.loader;
-            if (mc.empty())
-                mc = inst.mcVersion;
         }
 
         Modrinth::GetVersionsAsync(
@@ -291,7 +461,7 @@ namespace winrt::PretClient
                 if (versions.empty())
                 {
                     TextBlock t{};
-                    t.Text(L"No builds match (try clearing the MC filter).");
+                    t.Text(L"No builds match this instance version.");
                     t.Opacity(0.7);
                     list.Children().Append(t);
                     return;

@@ -74,7 +74,21 @@ namespace winrt::PretClient
         ver.Opacity(0.5);
         ver.Style(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>());
         ver.Text(hstring{ L"PretClient " } + Update::CurrentVersionTag());
-        m_root.Children().Append(ver);
+        ver.VerticalAlignment(VerticalAlignment::Center);
+
+        StackPanel updateRow{};
+        updateRow.Orientation(Orientation::Horizontal);
+        updateRow.Spacing(12);
+        updateRow.Children().Append(ver);
+        Button check{};
+        check.Content(box_value(L"Check for updates"));
+        check.Click([this](IInspectable const&, RoutedEventArgs const&) {
+            SetStatus(L"Checking for updates...");
+            if (m_onCheckUpdates)
+                m_onCheckUpdates();
+        });
+        updateRow.Children().Append(check);
+        m_root.Children().Append(updateRow);
 
         Refresh();
     }

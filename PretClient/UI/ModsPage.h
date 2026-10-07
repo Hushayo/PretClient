@@ -3,9 +3,10 @@
 #include "../Minecraft/Instance.h"
 #include "../Minecraft/Modrinth.h"
 
-// Mods page: live Modrinth search with loader/MC filters, infinite scroll,
-// per-row install into the selected instance, and a per-mod builds dialog
-// for installing one specific version.
+// Mods page: auto-loads Modrinth on tab open, filters locked to the
+// selected instance's MC version/loader, live search as you type, infinite
+// scroll, per-row install into the selected instance, and a per-mod builds
+// dialog for installing one specific version.
 namespace winrt::PretClient
 {
     struct ModsPage
@@ -19,6 +20,8 @@ namespace winrt::PretClient
 
     private:
         void FetchPage();
+        void SyncFiltersFromTarget();
+        void ScheduleSearch();
         winrt::fire_and_forget OnSearch();
         winrt::fire_and_forget OnInstall(Modrinth::ModHit hit);
         winrt::fire_and_forget InstallOneFile(Modrinth::ModFile file, std::wstring modsDir);
@@ -42,5 +45,8 @@ namespace winrt::PretClient
         int m_offset = 0;
         long long m_total = 0;
         bool m_loading = false;
+        int m_searchGen = 0;
+        bool m_syncing = false;
+        Microsoft::UI::Dispatching::DispatcherQueueTimer m_debounce{ nullptr };
     };
 }
