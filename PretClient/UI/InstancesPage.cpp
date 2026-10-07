@@ -1,6 +1,6 @@
 #include "pch.h"
 #include "InstancesPage.h"
-#include <winrt/Windows.Foundation.h>
+#include <winrt/Microsoft.UI.Dispatching.h>
 #include "Theme.h"
 #include "../Minecraft/Downloader.h"
 #include "../Minecraft/Fabric.h"
