@@ -445,22 +445,6 @@ namespace winrt::PretClient
             gamelog.Header(box_value(L"Client log"));
             body.Children().Append(gamelog);
 
-            if (isFabric)
-            {
-                Border infoBar{};
-                infoBar.Background(Theme::PillRunningBackground());
-                infoBar.CornerRadius(CornerRadiusHelper::FromUniformRadius(8));
-                infoBar.Padding(ThicknessHelper::FromLengths(10, 8, 10, 8));
-                TextBlock note{};
-                note.Style(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>());
-                note.Foreground(Theme::GoodBrush());
-                note.Opacity(0.9);
-                note.TextWrapping(TextWrapping::Wrap);
-                note.Text(L"Fabric loader + Fabric API install automatically on Play.");
-                infoBar.Child(note);
-                body.Children().Append(infoBar);
-            }
-
             StackPanel buttons{};
             buttons.Orientation(Orientation::Horizontal);
             buttons.Spacing(8);
