@@ -23,6 +23,7 @@ namespace winrt::PretClient
         winrt::fire_and_forget OnInstall(Modrinth::ModHit hit);
         winrt::fire_and_forget InstallOneFile(Modrinth::ModFile file, std::wstring modsDir);
         winrt::fire_and_forget BuildsDialog(Modrinth::ModHit hit);
+        winrt::fire_and_forget LoadIcon(hstring url, Microsoft::UI::Xaml::Controls::Image img);
         void SetStatus(hstring const& line);
 
         Microsoft::UI::Xaml::Controls::StackPanel m_root{};

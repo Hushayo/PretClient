@@ -2,6 +2,10 @@
 #include "ModsPage.h"
 #include "Theme.h"
 #include "../Settings.h"
+#include "../Paths.h"
+#include "../Minecraft/Http.h"
+#include <cwctype>
+#include <winrt/Microsoft.UI.Xaml.Media.Imaging.h>
 
 using namespace winrt;
 using namespace Microsoft::UI::Xaml;
@@ -148,8 +152,21 @@ namespace winrt::PretClient
                     grid.ColumnDefinitions().GetAt(0).Width(GridLengthHelper::FromValueAndType(1.0, GridUnitType::Star));
                     grid.ColumnDefinitions().GetAt(1).Width(GridLengthHelper::Auto());
 
+                    StackPanel head{};
+                    head.Orientation(Orientation::Horizontal);
+                    head.Spacing(10);
+
+                    Image icon{};
+                    icon.Width(48);
+                    icon.Height(48);
+                    icon.Stretch(Stretch::Uniform);
+                    if (!hit.iconUrl.empty())
+                        LoadIcon(hit.iconUrl, icon);
+                    head.Children().Append(icon);
+
                     StackPanel info{};
                     info.Spacing(2);
+                    head.Children().Append(info);
                     TextBlock title{};
                     title.Text(hit.title);
                     title.Style(Application::Current().Resources().Lookup(box_value(L"SubtitleTextBlockStyle")).as<Style>());
@@ -182,7 +199,7 @@ namespace winrt::PretClient
 
                     Grid::SetColumn(info, 0);
                     Grid::SetColumn(actions, 1);
-                    grid.Children().Append(info);
+                    grid.Children().Append(head);
                     grid.Children().Append(actions);
                     card.Child(grid);
                     m_results.Children().Append(card);
@@ -361,5 +378,51 @@ namespace winrt::PretClient
             });
 
         co_await dialog.ShowAsync();
+    }
+
+    fire_and_forget ModsPage::LoadIcon(hstring url, Image img)
+    {
+        try
+        {
+            std::wstring u{ url };
+            auto q = u.find(L'?');
+            if (q != std::wstring::npos)
+                u = u.substr(0, q);
+            auto slash = u.find_last_of(L'/');
+            std::wstring name = (slash == std::wstring::npos) ? u : u.substr(slash + 1);
+            for (auto& c : name)
+            {
+                if (!std::iswalnum(c) && c != L'.' && c != L'-' && c != L'_')
+                    c = L'_';
+            }
+            if (name.empty() || name == L".")
+                name = L"icon.png";
+            if (name.find(L'.') == std::wstring::npos)
+                name += L".png";
+            wchar_t suffix[24]{};
+            swprintf_s(suffix, L"_%08x",
+                static_cast<unsigned>(std::hash<std::wstring>{}(std::wstring{ url })));
+            name += suffix;
+            auto file = Paths::DataDir() / L"icons" / name;
+            std::error_code ec;
+            if (!std::filesystem::exists(file, ec))
+            {
+                auto err = co_await Http::DownloadToFileAsync(url, file, L"PretClient icon fetch", {});
+                if (!err.empty())
+                    co_return;
+            }
+            std::wstring uri{ L"file:///" };
+            std::wstring p{ file.wstring() };
+            for (auto& c : p)
+            {
+                if (c == L'\\')
+                    c = L'/';
+            }
+            uri += p;
+            img.Source(Microsoft::UI::Xaml::Media::Imaging::BitmapImage{ Windows::Foundation::Uri{ uri } });
+        }
+        catch (...)
+        {
+        }
     }
 }

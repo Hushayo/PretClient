@@ -45,7 +45,6 @@ namespace winrt::PretClient
             Microsoft::UI::Xaml::Controls::ComboBox versionBox,
             Microsoft::UI::Xaml::Controls::ComboBox loaderBox,
             Microsoft::UI::Xaml::Controls::TextBox loaderVerBox);
-        winrt::fire_and_forget InstallFabricApi(hstring id);
         winrt::fire_and_forget ProfileDialog();
 
         Microsoft::UI::Xaml::Controls::StackPanel m_root{};

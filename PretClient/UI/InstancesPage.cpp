@@ -8,10 +8,8 @@
 #include <shellapi.h>
 #include "../Minecraft/Java.h"
 #include "../Minecraft/Launcher.h"
-#include "../Minecraft/Modrinth.h"
 #include "../Minecraft/Versions.h"
 #include "../Settings.h"
-#include <fstream>
 
 using namespace winrt;
 using namespace Microsoft::UI::Xaml;
@@ -263,14 +261,6 @@ namespace winrt::PretClient
             buttons.Children().Append(play);
             buttons.Children().Append(stop);
             buttons.Children().Append(restart);
-
-            if (isFabric)
-            {
-                Button api{};
-                api.Content(box_value(L"Fabric API"));
-                api.Click([this, id](IInspectable const&, RoutedEventArgs const&) { InstallFabricApi(id); });
-                buttons.Children().Append(api);
-            }
 
             Button del{};
             del.Content(box_value(L"Delete"));
@@ -591,38 +581,6 @@ namespace winrt::PretClient
                     SetStatus(hstring{ L"Launch failed: " } + err);
                 Refresh();
             });
-    }
-
-    fire_and_forget InstancesPage::InstallFabricApi(hstring id)
-    {
-        SetStatus(L"Resolving Fabric API...");
-        hstring mc;
-        for (auto const& i : LoadInstances())
-        {
-            if (i.id == id)
-            {
-                mc = i.mcVersion;
-                break;
-            }
-        }
-        if (mc.empty())
-        {
-            SetStatus(L"Instance is gone.");
-            co_return;
-        }
-        auto settings = LoadSettings();
-        hstring msg;
-        try
-        {
-            msg = co_await Modrinth::EnsureFabricApiAsync(
-                std::filesystem::path{ std::wstring{ EffectiveGameDir(settings) } }.wstring(), mc);
-        }
-        catch (...)
-        {
-            msg = L"Fabric API install failed.";
-        }
-        SetStatus(msg);
-        Refresh();
     }
 
     fire_and_forget InstancesPage::AddDialog()
