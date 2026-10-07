@@ -142,8 +142,13 @@ namespace winrt::PretClient
         else if (s.maxMemMb <= 1024)
             idx = 0;
         m_mem.SelectedIndex(idx);
-        m_fpsBoost.IsChecked(box_value(s.fpsBoost));
-        m_highPriority.IsChecked(box_value(s.highPriority));
+        // SetValue (not IsChecked(box_value(...))): the IsChecked setter
+        // takes IReference<bool> and the boxed conversion does not compile
+        // here, while SetValue takes plain IInspectable.
+        auto checkedProp =
+            Microsoft::UI::Xaml::Controls::Primitives::ToggleButton::IsCheckedProperty();
+        m_fpsBoost.SetValue(checkedProp, box_value(s.fpsBoost));
+        m_highPriority.SetValue(checkedProp, box_value(s.highPriority));
         m_extraJvm.Text(s.extraJvmArgs);
     }
 

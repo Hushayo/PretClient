@@ -224,7 +224,7 @@ namespace winrt::PretClient
                 return;
             hstring current = Update::CurrentVersionTag();
             m_updateBar.Message(hstring{ L"PretClient " } + current + L" → " + latest +
-                L" is ready. Install now, or open Settings for details."));
+                L" is ready. Install now, or open Settings for details.");
             m_updateBar.IsOpen(true);
         }
         catch (...)
