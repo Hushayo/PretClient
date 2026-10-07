@@ -44,6 +44,9 @@
     <ClInclude Include="Minecraft\Fabric.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="Minecraft\Forge.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="Minecraft\Http.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -57,6 +60,12 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Minecraft\Modrinth.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Minecraft\NeoForge.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Minecraft\Quilt.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Minecraft\Rules.h">
@@ -106,6 +115,9 @@
     <ClCompile Include="Minecraft\Fabric.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="Minecraft\Forge.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="Minecraft\Instance.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -116,6 +128,12 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="Minecraft\Modrinth.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Minecraft\NeoForge.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Minecraft\Quilt.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="Minecraft\Versions.cpp">

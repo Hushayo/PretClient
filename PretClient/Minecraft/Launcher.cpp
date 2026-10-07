@@ -140,7 +140,7 @@ namespace winrt::PretClient::Launcher
         std::wstring clientJar{ game.clientJar };
 
         // Classpath: vanilla libraries (allowed, non-native artifacts) in
-        // manifest order, then fabric extras, then the client jar last.
+        // manifest order, then loader extras, then the client jar last.
         std::wstring cp;
         auto pushCp = [&](std::wstring const& jar) {
             if (!cp.empty())
@@ -203,8 +203,20 @@ namespace winrt::PretClient::Launcher
         catch (...)
         {
         }
-        if (!game.fabricMainClass.empty())
-            mainClass = game.fabricMainClass;
+        // Any loader profile (fabric/quilt/forge/neoforge) overrides the
+        // entry point with its own Knot/Bootstrap launcher.
+        try
+        {
+            if (game.loaderProfile && game.loaderProfile.HasKey(L"mainClass"))
+            {
+                hstring lm = game.loaderProfile.GetNamedString(L"mainClass");
+                if (!lm.empty())
+                    mainClass = lm;
+            }
+        }
+        catch (...)
+        {
+        }
 
         std::map<std::wstring, hstring> vars{
             { L"auth_player_name", username },
@@ -245,8 +257,20 @@ namespace winrt::PretClient::Launcher
         catch (...)
         {
         }
-        for (auto const& extra : game.fabricJvmExtras)
-            jvm.push_back(std::wstring{ Rules::Substitute(extra, vars) });
+        // Loader JVM args (fabric's plain strings and forge/neoforge's
+        // rules-aware entries alike) come after the vanilla ones.
+        try
+        {
+            if (game.loaderProfile && game.loaderProfile.HasKey(L"arguments"))
+            {
+                auto largs = game.loaderProfile.GetNamedObject(L"arguments");
+                if (largs.HasKey(L"jvm"))
+                    AppendArgs(jvm, largs.GetNamedArray(L"jvm"), vars);
+            }
+        }
+        catch (...)
+        {
+        }
 
         // -cp + main class (unless the JSON already carried them).
         bool hasCp = false;
@@ -274,12 +298,40 @@ namespace winrt::PretClient::Launcher
                 auto args = game.versionJson.GetNamedObject(L"arguments");
                 if (args.HasKey(L"game"))
                     AppendArgs(game_, args.GetNamedArray(L"game"), vars);
+                // Loader game args (forge/neoforge launch targets; empty for
+                // fabric/quilt) are appended after the vanilla ones.
+                try
+                {
+                    if (game.loaderProfile && game.loaderProfile.HasKey(L"arguments"))
+                    {
+                        auto largs = game.loaderProfile.GetNamedObject(L"arguments");
+                        if (largs.HasKey(L"game"))
+                            AppendArgs(game_, largs.GetNamedArray(L"game"), vars);
+                    }
+                }
+                catch (...)
+                {
+                }
             }
             else if (game.versionJson && game.versionJson.HasKey(L"minecraftArguments"))
             {
-                // Legacy space-separated template.
-                std::wstring tpl = std::wstring{ Rules::Substitute(
-                    game.versionJson.GetNamedString(L"minecraftArguments"), vars) };
+                // Legacy space-separated template. A loader template (old
+                // forge tweakClass line) replaces the vanilla one outright:
+                // it already carries the full argument set.
+                hstring tplSrc = game.versionJson.GetNamedString(L"minecraftArguments");
+                try
+                {
+                    if (game.loaderProfile && game.loaderProfile.HasKey(L"minecraftArguments"))
+                    {
+                        hstring lt = game.loaderProfile.GetNamedString(L"minecraftArguments");
+                        if (!lt.empty())
+                            tplSrc = lt;
+                    }
+                }
+                catch (...)
+                {
+                }
+                std::wstring tpl = std::wstring{ Rules::Substitute(tplSrc, vars) };
                 size_t pos = 0;
                 while (pos < tpl.size())
                 {

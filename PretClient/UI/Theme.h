@@ -117,6 +117,18 @@ namespace winrt::PretClient::Theme
     {
         return Microsoft::UI::Xaml::Media::SolidColorBrush{ Windows::UI::ColorHelper::FromArgb(0xFF, 0x24, 0x5C, 0x20) };
     }
+    inline Microsoft::UI::Xaml::Media::SolidColorBrush IconQuiltBackground()
+    {
+        return Microsoft::UI::Xaml::Media::SolidColorBrush{ Windows::UI::ColorHelper::FromArgb(0xFF, 0x3B, 0x2A, 0x5E) };
+    }
+    inline Microsoft::UI::Xaml::Media::SolidColorBrush IconForgeBackground()
+    {
+        return Microsoft::UI::Xaml::Media::SolidColorBrush{ Windows::UI::ColorHelper::FromArgb(0xFF, 0x5E, 0x3D, 0x16) };
+    }
+    inline Microsoft::UI::Xaml::Media::SolidColorBrush IconNeoForgeBackground()
+    {
+        return Microsoft::UI::Xaml::Media::SolidColorBrush{ Windows::UI::ColorHelper::FromArgb(0xFF, 0x5E, 0x20, 0x20) };
+    }
     inline Microsoft::UI::Xaml::Media::SolidColorBrush IconVanillaBackground()
     {
         return Microsoft::UI::Xaml::Media::SolidColorBrush{ Windows::UI::ColorHelper::FromArgb(0xFF, 0x38, 0x38, 0x38) };

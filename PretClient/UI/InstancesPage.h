@@ -9,7 +9,7 @@
 
 // Instances page: long cards with loader badge, version, live CPU/RAM/GPU,
 // game log, progress bar with speed, Play / Stop / Restart, per-instance
-// mods manager (fabric only: enable/disable, remove, update check), delete,
+// mods manager (any loader: enable/disable, remove, update check), delete,
 // profile switching, New dialog fed by the real piston-meta manifest
 // (release/snapshot/beta/alpha).
 namespace winrt::PretClient
@@ -69,7 +69,7 @@ namespace winrt::PretClient
         winrt::fire_and_forget UpdateStatsAsync();
         static hstring TailText(std::filesystem::path const& file);
         // Copy the instance's enabled mods into <gameDir>/mods right before
-        // launch (Fabric only reads that folder, game files stay shared).
+        // launch (loaders only read that folder, game files stay shared).
         static void StageMods(std::filesystem::path const& instanceMods,
             std::filesystem::path const& gameMods);
         winrt::fire_and_forget PlayInstance(hstring id);
@@ -77,7 +77,7 @@ namespace winrt::PretClient
         // background thread (process spawns with long waits must never block
         // the UI thread), then the build/start happens back on top of it.
         winrt::fire_and_forget FinishLaunch(hstring id, hstring username, hstring javaPath,
-            int minMem, int maxMem, Downloader::PreparedGame game, bool isFabric,
+            int minMem, int maxMem, Downloader::PreparedGame game, bool isModded,
             std::filesystem::path instanceMods, std::filesystem::path gameMods);
         winrt::fire_and_forget ModsDialog(hstring id);
         winrt::fire_and_forget AddDialog();

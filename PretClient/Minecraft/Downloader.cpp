@@ -1,13 +1,18 @@
 #include "pch.h"
 #include "Downloader.h"
 #include "Fabric.h"
+#include "Forge.h"
 #include "Http.h"
+#include "Java.h"
 #include "Modrinth.h"
+#include "NeoForge.h"
+#include "Quilt.h"
 #include "Rules.h"
 #include "Versions.h"
 #include <algorithm>
 #include <coroutine>
 #include <fstream>
+#include <set>
 
 using namespace winrt;
 using namespace Windows::Data::Json;
@@ -255,11 +260,158 @@ namespace winrt::PretClient::Downloader
             }
             b->wg.Done();
         }
+
+        // Runs a forge/neoforge installer jar headless:
+        //   "<java>" -jar <installer> --installClient <gameDir>
+        // stdout/stderr go to logFile. The process is polled (never a
+        // blocking wait: this coroutine lives on the UI thread), so the
+        // window stays responsive through the minutes-long install.
+        // Returns the process exit code, or -1 when it could not start.
+        IAsyncOperation<int> RunInstallerAsync(hstring javaExe,
+            std::filesystem::path installerJar, std::filesystem::path gameDir,
+            std::filesystem::path logFile)
+        {
+            int code = -1;
+            try
+            {
+                std::error_code ec;
+                std::filesystem::create_directories(logFile.parent_path(), ec);
+                HANDLE logH = CreateFileW(logFile.c_str(), GENERIC_WRITE,
+                    FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, CREATE_ALWAYS,
+                    FILE_ATTRIBUTE_NORMAL, nullptr);
+                std::wstring line = L"\"" + std::wstring{ javaExe } + L"\" -jar \"" +
+                    installerJar.wstring() + L"\" --installClient \"" +
+                    gameDir.wstring() + L"\"";
+                STARTUPINFOW si{ sizeof(si) };
+                si.dwFlags = STARTF_USESHOWWINDOW | STARTF_USESTDHANDLES;
+                si.wShowWindow = SW_HIDE;
+                si.hStdOutput = logH ? logH : GetStdHandle(STD_OUTPUT_HANDLE);
+                si.hStdError = si.hStdOutput;
+                si.hStdInput = nullptr;
+                PROCESS_INFORMATION pi{};
+                BOOL ok = CreateProcessW(nullptr, line.data(), nullptr, nullptr, TRUE,
+                    CREATE_NO_WINDOW, nullptr, gameDir.wstring().c_str(), &si, &pi);
+                if (logH)
+                    CloseHandle(logH);
+                if (!ok)
+                    co_return -1;
+                CloseHandle(pi.hThread);
+                for (;;)
+                {
+                    DWORD wait = WaitForSingleObject(pi.hProcess, 0);
+                    if (wait != WAIT_TIMEOUT)
+                        break;
+                    co_await winrt::resume_after(std::chrono::seconds{ 1 });
+                }
+                DWORD exit = 1;
+                GetExitCodeProcess(pi.hProcess, &exit);
+                CloseHandle(pi.hProcess);
+                code = static_cast<int>(exit);
+            }
+            catch (...)
+            {
+                code = -1;
+            }
+            co_return code;
+        }
+
+        JsonObject ReadProfileFile(std::filesystem::path const& p)
+        {
+            JsonObject o{ nullptr };
+            try
+            {
+                std::ifstream f(p, std::ios::binary);
+                if (!f.good())
+                    return o;
+                std::string text((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+                if (!text.empty())
+                    o = JsonObject::Parse(to_hstring(text));
+            }
+            catch (...)
+            {
+                o = JsonObject{ nullptr };
+            }
+            return o;
+        }
+
+        bool HasLoaderMain(JsonObject const& profile)
+        {
+            try
+            {
+                return profile && profile.HasKey(L"mainClass");
+            }
+            catch (...)
+            {
+                return false;
+            }
+        }
+
+        // The installer names its output versions/<id>/<id>.json, but the id
+        // scheme has changed across eras -- if the expected file is missing,
+        // scan for any usable forge/neoforge profile for this MC instead of
+        // failing outright.
+        JsonObject FindInstalledProfile(std::filesystem::path const& versionsRoot,
+            hstring mcVersion, hstring kindSub)
+        {
+            JsonObject found{ nullptr };
+            try
+            {
+                std::wstring kind{ kindSub };
+                std::wstring mc{ mcVersion };
+                int best = 0;
+                std::error_code ec;
+                if (!std::filesystem::exists(versionsRoot, ec))
+                    return found;
+                for (auto const& e : std::filesystem::directory_iterator(versionsRoot, ec))
+                {
+                    try
+                    {
+                        if (!e.is_directory(ec))
+                            continue;
+                        auto dir = e.path();
+                        auto cand = dir / (dir.filename().wstring() + L".json");
+                        std::error_code ec2;
+                        if (!std::filesystem::exists(cand, ec2))
+                            continue;
+                        auto o = ReadProfileFile(cand);
+                        if (!HasLoaderMain(o))
+                            continue;
+                        int score = 0;
+                        try
+                        {
+                            hstring id = o.HasKey(L"id")
+                                ? o.GetNamedString(L"id")
+                                : hstring{ dir.filename().wstring() };
+                            std::wstring s{ id };
+                            if (s.find(kind) == std::wstring::npos)
+                                continue;
+                            score = (s.rfind(mc, 0) == 0) ? 2 : 1;
+                        }
+                        catch (...)
+                        {
+                            continue;
+                        }
+                        if (score > best)
+                        {
+                            best = score;
+                            found = o;
+                        }
+                    }
+                    catch (...)
+                    {
+                    }
+                }
+            }
+            catch (...)
+            {
+            }
+            return found;
+        }
     } // namespace
 
     fire_and_forget PrepareAsync(
         hstring mcVersion, hstring loader, hstring loaderVersion,
-        std::wstring gameDir, std::wstring modsDir,
+        std::wstring gameDir, std::wstring modsDir, hstring javaPathHint,
         LogFn log, FileProgFn prog, DoneFn done)
     {
         auto fail = [&](hstring const& msg) { done(false, PreparedGame{}, msg); };
@@ -267,35 +419,68 @@ namespace winrt::PretClient::Downloader
         try
         {
             bool isFabric = (loader == L"fabric");
+            bool isQuilt = (loader == L"quilt");
+            bool isForge = (loader == L"forge");
+            bool isNeoForge = (loader == L"neoforge");
+            bool isModded = isFabric || isQuilt || isForge || isNeoForge;
+            hstring kindName = isForge ? hstring{ L"Forge" }
+                : isNeoForge           ? hstring{ L"NeoForge" }
+                : isQuilt              ? hstring{ L"Quilt" }
+                                       : hstring{ L"Fabric" };
             hstring useLoader = loaderVersion;
-            if (isFabric && useLoader.empty())
+            if (isModded && useLoader.empty())
             {
-                log(L"Resolving fabric loader...");
-                useLoader = co_await Fabric::GetLatestLoader(mcVersion);
+                log(hstring{ L"Resolving " } + loader + hstring{ L" loader..." });
+                try
+                {
+                    if (isFabric)
+                        useLoader = co_await Fabric::GetLatestLoader(mcVersion);
+                    else if (isQuilt)
+                        useLoader = co_await Quilt::GetLatestLoader(mcVersion);
+                    else if (isForge)
+                        useLoader = co_await Forge::GetLatestForge(mcVersion);
+                    else
+                        useLoader = co_await NeoForge::GetLatestNeoForge(mcVersion);
+                }
+                catch (...)
+                {
+                }
                 if (useLoader.empty())
                 {
-                    fail(L"No fabric loader for this version.");
+                    fail(hstring{ L"No " } + loader + hstring{ L" loader for " } +
+                        mcVersion + hstring{ L"." });
                     co_return;
                 }
-                log(hstring{ L"Fabric loader " } + useLoader);
+                log(kindName + hstring{ L" loader " } + useLoader);
             }
-            if (isFabric)
+            if (isFabric || isQuilt)
             {
-                log(L"Fetching fabric profile...");
-                game.fabricProfile = co_await Fabric::GetProfile(mcVersion, useLoader);
-                if (!game.fabricProfile)
+                log(kindName + hstring{ L" profile..." });
+                JsonObject prof{ nullptr };
+                try
                 {
-                    fail(L"Fabric profile fetch failed.");
+                    if (isFabric)
+                        prof = co_await Fabric::GetProfile(mcVersion, useLoader);
+                    else
+                        prof = co_await Quilt::GetProfile(mcVersion, useLoader);
+                }
+                catch (...)
+                {
+                }
+                game.loaderProfile = prof;
+                if (!game.loaderProfile)
+                {
+                    fail(kindName + hstring{ L" profile fetch failed." });
                     co_return;
                 }
             }
 
             hstring vanillaId = mcVersion;
-            if (isFabric && game.fabricProfile.HasKey(L"inheritsFrom"))
+            if ((isFabric || isQuilt) && game.loaderProfile.HasKey(L"inheritsFrom"))
             {
                 try
                 {
-                    vanillaId = game.fabricProfile.GetNamedString(L"inheritsFrom");
+                    vanillaId = game.loaderProfile.GetNamedString(L"inheritsFrom");
                 }
                 catch (...)
                 {
@@ -405,6 +590,123 @@ namespace winrt::PretClient::Downloader
             std::filesystem::remove_all(game.nativesDir.c_str(), ec);
             std::filesystem::create_directories(std::filesystem::path{ std::wstring{ game.nativesDir } }, ec);
 
+            if (isForge || isNeoForge)
+            {
+                // The installer writes versions/<id>/<id>.json (libraries +
+                // mainClass + args); the profile below feeds the same library
+                // and launch merging as the fabric/quilt profiles.
+                hstring installerUrl = isForge
+                    ? Forge::InstallerUrl(mcVersion, useLoader)
+                    : NeoForge::InstallerUrl(useLoader);
+                hstring expectedId = isForge
+                    ? Forge::ExpectedVersionId(mcVersion, useLoader)
+                    : NeoForge::ExpectedVersionId(mcVersion, useLoader);
+                hstring kindSub = isForge ? hstring{ L"forge" } : hstring{ L"neoforge" };
+                hstring installLogName =
+                    isForge ? hstring{ L"forge-install.log" } : hstring{ L"neoforge-install.log" };
+                std::filesystem::path loaderDir =
+                    gamePath / L"versions" / std::filesystem::path{ std::wstring{ expectedId } };
+                std::filesystem::path loaderJson =
+                    loaderDir / (std::wstring{ expectedId } + L".json");
+                std::filesystem::path installerJar = loaderDir / L"installer.jar";
+                if (!HasLoaderMain(ReadProfileFile(loaderJson)))
+                {
+                    // Fast path missed: maybe a previous run installed under a
+                    // different id scheme.
+                    game.loaderProfile =
+                        FindInstalledProfile(gamePath / L"versions", mcVersion, kindSub);
+                }
+                else
+                {
+                    game.loaderProfile = ReadProfileFile(loaderJson);
+                }
+                if (!HasLoaderMain(game.loaderProfile))
+                {
+                    game.loaderProfile = JsonObject{ nullptr };
+                    if (installerUrl.empty() || expectedId.empty())
+                    {
+                        fail(kindName + hstring{ L" version not recognized for " } +
+                            mcVersion + hstring{ L"." });
+                        co_return;
+                    }
+                    log(kindName + hstring{ L" installer..." });
+                    {
+                        std::error_code ec2;
+                        std::filesystem::remove(installerJar, ec2); // always a fresh copy
+                    }
+                    if (auto err = co_await FetchFile(installerUrl, installerJar, 0, hstring{},
+                            kindName + hstring{ L" installer" }, log, prog);
+                        !err.empty())
+                    {
+                        fail(err);
+                        co_return;
+                    }
+                    log(hstring{ L"Locating Java for the installer..." });
+                    hstring javaExe = javaPathHint;
+                    if (!javaExe.empty() && Java::Verify(javaExe).major < game.javaMajor)
+                        javaExe = L"";
+                    if (javaExe.empty())
+                    {
+                        try
+                        {
+                            javaExe = Java::PickDetailed(game.javaMajor).path;
+                        }
+                        catch (...)
+                        {
+                        }
+                    }
+                    if (javaExe.empty())
+                    {
+                        fail(hstring{ L"No Java " } + to_hstring(game.javaMajor) +
+                            hstring{ L"+ found for the " } + kindName +
+                            hstring{ L" installer. Install a 64-bit Java or set java.exe in Settings." });
+                        co_return;
+                    }
+                    try // the installer refuses to run without a profiles file
+                    {
+                        auto prof = gamePath / L"launcher_profiles.json";
+                        std::error_code ec2;
+                        if (!std::filesystem::exists(prof, ec2))
+                        {
+                            std::ofstream f(prof, std::ios::binary | std::ios::trunc);
+                            if (f.good())
+                                f << "{\"profiles\":{}}";
+                        }
+                    }
+                    catch (...)
+                    {
+                    }
+                    log(kindName + hstring{ L" installer running (can take a few minutes)..." });
+                    prog(kindName + hstring{ L" installer" }, 0, 0, 0.0);
+                    auto installLog = gamePath / L"logs-pretclient" / installLogName;
+                    int exit = co_await RunInstallerAsync(javaExe, installerJar, gamePath, installLog);
+                    game.loaderProfile = ReadProfileFile(loaderJson);
+                    if (!HasLoaderMain(game.loaderProfile))
+                        game.loaderProfile =
+                            FindInstalledProfile(gamePath / L"versions", mcVersion, kindSub);
+                    if (!HasLoaderMain(game.loaderProfile))
+                    {
+                        fail(kindName + hstring{ L" installer failed (exit " } +
+                            to_hstring(exit) + hstring{ L"). See logs-pretclient/" } +
+                            installLogName);
+                        co_return;
+                    }
+                    try
+                    {
+                        std::error_code ec2;
+                        std::filesystem::remove(installerJar, ec2);
+                    }
+                    catch (...)
+                    {
+                    }
+                    log(kindName + hstring{ L" " } + useLoader + hstring{ L" ready." });
+                }
+                else
+                {
+                    log(kindName + hstring{ L" profile ready." });
+                }
+            }
+
             hstring clientUrl, clientSha1;
             long long clientSize = 0;
             try
@@ -430,6 +732,7 @@ namespace winrt::PretClient::Downloader
 
             log(L"Libraries...");
             std::vector<std::filesystem::path> nativeZips;
+            std::set<std::wstring> seenLibs; // vanilla + loader share one download set
             FetchBatch libBatch{};
             libBatch.label = L"libraries";
             libBatch.log = log;
@@ -463,6 +766,7 @@ namespace winrt::PretClient::Downloader
                             auto dest = libsDir / std::filesystem::path{ std::wstring{ rel } };
                             libBatch.Add(url, dest, size, sha1,
                                 hstring{ L"lib " } + std::wstring{ name });
+                            seenLibs.insert(dest.wstring());
                             if (IsNativesEntry(std::wstring{ name }))
                                 nativeZips.push_back(dest);
                         }
@@ -499,6 +803,7 @@ namespace winrt::PretClient::Downloader
                                     size = static_cast<long long>(art.GetNamedNumber(L"size"));
                                 auto dest = libsDir / std::filesystem::path{ std::wstring{ rel.empty() ? L"natives-legacy.jar" : rel } };
                                 libBatch.Add(url, dest, size, sha1, L"legacy natives");
+                                seenLibs.insert(dest.wstring());
                                 nativeZips.push_back(dest);
                             }
                         }
@@ -509,56 +814,82 @@ namespace winrt::PretClient::Downloader
                 }
             }
 
-            if (isFabric && game.fabricProfile.HasKey(L"libraries"))
+            // Loader libraries: fabric/quilt maven entries plus forge/neoforge
+            // installed entries (maven-style or vanilla-style artifacts).
+            // Vanilla already queued its own set above, so anything already
+            // covered is skipped here instead of being hashed twice.
+            if (isModded && game.loaderProfile && game.loaderProfile.HasKey(L"libraries"))
             {
-                log(L"Fabric libraries...");
-                for (auto const& lv : game.fabricProfile.GetNamedArray(L"libraries"))
+                log(kindName + hstring{ L" libraries..." });
+                try
                 {
-                    if (lv.ValueType() != JsonValueType::Object)
-                        continue;
-                    auto lib = lv.GetObject();
-                    hstring name = OptStr(lib, L"name");
-                    hstring base = OptStr(lib, L"url");
-                    if (name.empty() || base.empty())
-                        continue;
-                    hstring rel = Fabric::MavenJarPath(name);
-                    if (rel.empty())
-                        continue;
-                    if (base.back() != L'/')
-                        base = base + L"/";
-                    hstring url = base + rel;
-                    hstring sha1 = OptStr(lib, L"sha1");
-                    long long size = 0;
-                    try
+                    for (auto const& lv : game.loaderProfile.GetNamedArray(L"libraries"))
                     {
-                        if (lib.HasKey(L"size"))
-                            size = static_cast<long long>(lib.GetNamedNumber(L"size"));
-                    }
-                    catch (...)
-                    {
-                    }
-                    auto dest = libsDir / std::filesystem::path{ std::wstring{ rel } };
-                    libBatch.Add(url, dest, size, sha1, hstring{ L"fabric " } + std::wstring{ name });
-                    game.extraClasspath.push_back(hstring{ dest.wstring() });
-                }
-                game.fabricMainClass = OptStr(game.fabricProfile, L"mainClass");
-                if (game.fabricProfile.HasKey(L"arguments"))
-                {
-                    try
-                    {
-                        auto args = game.fabricProfile.GetNamedObject(L"arguments");
-                        if (args.HasKey(L"jvm"))
+                        if (lv.ValueType() != JsonValueType::Object)
+                            continue;
+                        auto lib = lv.GetObject();
+                        if (!Rules::EntryAllowed(lib))
+                            continue;
+                        hstring name = OptStr(lib, L"name");
+                        hstring base = OptStr(lib, L"url");
+                        hstring rel, url, sha1;
+                        long long size = 0;
+                        bool have = false;
+                        try
                         {
-                            for (auto const& jv : args.GetNamedArray(L"jvm"))
+                            if (lib.HasKey(L"downloads"))
                             {
-                                if (jv.ValueType() == JsonValueType::String)
-                                    game.fabricJvmExtras.push_back(jv.GetString());
+                                auto dl = lib.GetNamedObject(L"downloads");
+                                if (dl.HasKey(L"artifact"))
+                                {
+                                    auto art = dl.GetNamedObject(L"artifact");
+                                    rel = OptStr(art, L"path");
+                                    url = OptStr(art, L"url");
+                                    sha1 = OptStr(art, L"sha1");
+                                    if (art.HasKey(L"size"))
+                                        size = static_cast<long long>(art.GetNamedNumber(L"size"));
+                                    have = !rel.empty() && !url.empty();
+                                }
                             }
                         }
+                        catch (...)
+                        {
+                            have = false;
+                        }
+                        if (!have && !name.empty() && !base.empty())
+                        {
+                            hstring mrel = Fabric::MavenJarPath(name);
+                            if (mrel.empty())
+                                continue;
+                            if (base.back() != L'/')
+                                base = base + L"/";
+                            url = base + mrel;
+                            rel = mrel;
+                            sha1 = OptStr(lib, L"sha1");
+                            size = 0;
+                            try
+                            {
+                                if (lib.HasKey(L"size"))
+                                    size = static_cast<long long>(lib.GetNamedNumber(L"size"));
+                            }
+                            catch (...)
+                            {
+                            }
+                            have = true;
+                        }
+                        if (!have)
+                            continue;
+                        auto dest = libsDir / std::filesystem::path{ std::wstring{ rel } };
+                        if (seenLibs.find(dest.wstring()) != seenLibs.end())
+                            continue;
+                        seenLibs.insert(dest.wstring());
+                        libBatch.Add(url, dest, size, sha1,
+                            hstring{ L"loader " } + (name.empty() ? rel : name));
+                        game.extraClasspath.push_back(hstring{ dest.wstring() });
                     }
-                    catch (...)
-                    {
-                    }
+                }
+                catch (...)
+                {
                 }
             }
 

@@ -11,7 +11,7 @@ namespace winrt::PretClient
         hstring id{};
         hstring name{};
         hstring mcVersion{ L"1.21.4" };
-        hstring loader{ L"vanilla" }; // "vanilla" | "fabric"
+        hstring loader{ L"vanilla" }; // "vanilla" | "fabric" | "quilt" | "forge" | "neoforge"
         hstring loaderVersion{};
         int maxMemMb = 2048;
     };

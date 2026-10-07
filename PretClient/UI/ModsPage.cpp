@@ -388,7 +388,7 @@ namespace winrt::PretClient
         auto inst = m_targets[static_cast<size_t>(m_target.SelectedIndex())];
         if (inst.loader == L"vanilla")
         {
-            SetStatus(L"Target is vanilla (no mod loader) — mods won't load. Create a Fabric instance instead.");
+            SetStatus(L"Target is vanilla (no mod loader) — mods won't load. Create a modded instance instead.");
             co_return;
         }
         hstring loader = inst.loader == L"vanilla" ? m_lastLoader : inst.loader;
@@ -519,7 +519,7 @@ namespace winrt::PretClient
                     install.Click([this, v, modsDir, dialog, targetVanilla](IInspectable const&, RoutedEventArgs const&) mutable {
                         if (targetVanilla)
                         {
-                            SetStatus(L"Target is vanilla (no mod loader) — mods won't load. Create a Fabric instance instead.");
+                            SetStatus(L"Target is vanilla (no mod loader) — mods won't load. Create a modded instance instead.");
                             return;
                         }
                         Modrinth::ModFile file{};

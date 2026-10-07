@@ -21,6 +21,6 @@ namespace winrt::PretClient
     // <gameDir>/instances/<id> -- per-instance scratch space.
     std::filesystem::path InstanceDir(Settings const& s, hstring const& instanceId);
     // <gameDir>/instances/<id>/mods -- mods owned by one instance; staged
-    // into <gameDir>/mods right before launch so Fabric sees them.
+    // into <gameDir>/mods right before launch so the mod loader sees them.
     std::filesystem::path InstanceModsDir(Settings const& s, hstring const& instanceId);
 }

@@ -292,7 +292,8 @@ namespace winrt::PretClient::Http
     }
 
     // Read one entry out of a zip (jars are zips) via the inbox tar.exe,
-    // streaming to stdout through a pipe. Used to read fabric.mod.json.
+    // streaming to stdout through a pipe. Used to read mod metadata
+    // (fabric.mod.json, quilt.mod.json).
     inline bool ZipEntryToString(std::filesystem::path const& zip,
         std::wstring const& entry, std::string& out)
     {

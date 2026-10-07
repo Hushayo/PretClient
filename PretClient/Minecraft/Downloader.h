@@ -5,15 +5,17 @@
 // Resolves + downloads everything one instance needs into the shared
 // roaming .minecraft folder: client jar, libraries (rules-filtered),
 // natives extraction, asset index + objects, logging config, and for
-// fabric instances the loader profile libraries + fabric-api.
+// modded instances the loader pieces:
+//   fabric/quilt: loader profile libraries (maven) + fabric-api (fabric only)
+//   forge/neoforge: installer run (--installClient) + installed profile libraries.
 namespace winrt::PretClient::Downloader
 {
     using LogFn = std::function<void(hstring const&)>;
 
     struct PreparedGame
     {
-        Windows::Data::Json::JsonObject versionJson{ nullptr };
-        Windows::Data::Json::JsonObject fabricProfile{ nullptr }; // null unless fabric
+        Windows::Data::Json::JsonObject versionJson{ nullptr }; // vanilla package
+        Windows::Data::Json::JsonObject loaderProfile{ nullptr }; // null when vanilla
         hstring vanillaId{};
         hstring clientJar{};
         hstring nativesDir{};
@@ -21,9 +23,7 @@ namespace winrt::PretClient::Downloader
         hstring assetIndexId{};
         hstring loggingPath{};
         hstring gameDir{};
-        std::vector<hstring> extraClasspath{}; // fabric loader/intermediary jars
-        std::vector<hstring> fabricJvmExtras{};
-        hstring fabricMainClass{};
+        std::vector<hstring> extraClasspath{}; // loader jars (maven + loader-only artifacts)
         int javaMajor = 8;
     };
 
@@ -37,6 +37,6 @@ namespace winrt::PretClient::Downloader
     // allocation" prepare failures). Do not change back to references.
     winrt::fire_and_forget PrepareAsync(
         hstring mcVersion, hstring loader, hstring loaderVersion,
-        std::wstring gameDir, std::wstring modsDir,
+        std::wstring gameDir, std::wstring modsDir, hstring javaPathHint,
         LogFn log, FileProgFn prog, DoneFn done);
 }
