@@ -43,6 +43,7 @@ namespace winrt::PretClient
             s.username = str(L"username", L"Steve");
             s.gameDir = str(L"gameDir", L"");
             s.javaPath = str(L"javaPath", L"");
+            s.msClientId = str(L"msClientId", L"");
             s.curseforgeKey = str(L"curseforgeKey", L"");
             try
             {
@@ -106,6 +107,7 @@ namespace winrt::PretClient
         o.SetNamedValue(L"profiles", profs);
         o.SetNamedValue(L"gameDir", JsonValue::CreateStringValue(s.gameDir));
         o.SetNamedValue(L"javaPath", JsonValue::CreateStringValue(s.javaPath));
+        o.SetNamedValue(L"msClientId", JsonValue::CreateStringValue(s.msClientId));
         o.SetNamedValue(L"curseforgeKey", JsonValue::CreateStringValue(s.curseforgeKey));
         o.SetNamedValue(L"maxMemMb", JsonValue::CreateNumberValue(s.maxMemMb));
         o.SetNamedValue(L"minMemMb", JsonValue::CreateNumberValue(s.minMemMb));
