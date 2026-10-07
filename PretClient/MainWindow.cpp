@@ -3,6 +3,7 @@
 #include "UI/Theme.h"
 #include "Minecraft/Http.h"
 #include "Update/Updater.h"
+#include <chrono>
 #include <filesystem>
 #include <shellapi.h>
 
@@ -10,11 +11,35 @@ using namespace winrt;
 using namespace Microsoft::UI::Xaml;
 using namespace Microsoft::UI::Xaml::Controls;
 using namespace Microsoft::UI::Xaml::Media;
+using namespace Microsoft::UI::Xaml::Media::Animation;
 using namespace Windows::Data::Json;
 using namespace Windows::Foundation;
 
 namespace winrt::PretClient
 {
+    namespace
+    {
+        // 150ms fade-in for tab content swaps. Opacity is a compositor
+        // animation: it runs on the GPU, not the UI thread.
+        void FadeIn(UIElement const& el)
+        {
+            try
+            {
+                Storyboard sb{};
+                DoubleAnimation anim{};
+                anim.From(box_value(0.0).as<Windows::Foundation::IReference<double>>());
+                anim.To(box_value(1.0).as<Windows::Foundation::IReference<double>>());
+                anim.Duration(DurationHelper::FromTimeSpan(std::chrono::milliseconds{ 150 }));
+                Storyboard::SetTarget(anim, el);
+                Storyboard::SetTargetProperty(anim, L"Opacity");
+                sb.Children().Append(anim);
+                sb.Begin();
+            }
+            catch (...)
+            {
+            }
+        }
+    } // namespace
     MainWindow::MainWindow()
     {
         Title(L"PretClient");
@@ -83,16 +108,19 @@ namespace winrt::PretClient
             {
                 m_mods.RefreshInstances();
                 m_host.Children().Append(m_mods.Root());
+                FadeIn(m_mods.Root());
             }
             else if (tag == L"settings")
             {
                 m_settings.Refresh();
                 m_host.Children().Append(m_settings.Root());
+                FadeIn(m_settings.Root());
             }
             else
             {
                 m_instances.Refresh();
                 m_host.Children().Append(m_instances.Root());
+                FadeIn(m_instances.Root());
             }
         });
         Grid::SetRow(nav, 1);

@@ -2,6 +2,8 @@
 
 #include <chrono>
 #include <fstream>
+#include <map>
+#include <mutex>
 #include <vector>
 #include <winrt/Windows.Storage.Streams.h>
 #include <winrt/Windows.Web.Http.h>
@@ -11,18 +13,37 @@
 // Throws winrt::hresult_error on failure; callers translate to status text.
 namespace winrt::PretClient::Http
 {
+    // One client per User-Agent, shared by every fetch. Connection reuse
+    // (keep-alive) across thousands of tiny asset/library files: a fresh
+    // client per file meant a full TCP+TLS handshake per file, which both
+    // crawled and pegged a CPU core. All callers run on the UI thread today;
+    // the mutex keeps it safe if that ever changes.
+    inline Windows::Web::Http::HttpClient& ClientFor(hstring const& userAgent)
+    {
+        static std::mutex m;
+        static std::map<std::wstring, Windows::Web::Http::HttpClient> clients;
+        std::lock_guard<std::mutex> lk(m);
+        std::wstring key{ userAgent };
+        auto it = clients.find(key);
+        if (it == clients.end())
+        {
+            Windows::Web::Http::HttpClient c;
+            try
+            {
+                c.DefaultRequestHeaders().Append(L"User-Agent", userAgent);
+            }
+            catch (...)
+            {
+            }
+            it = clients.emplace(std::move(key), std::move(c)).first;
+        }
+        return it->second;
+    }
+
     inline Windows::Foundation::IAsyncOperation<Windows::Web::Http::HttpResponseMessage> GetAsync(
         hstring url, hstring userAgent)
     {
-        Windows::Web::Http::HttpClient client;
-        try
-        {
-            client.DefaultRequestHeaders().Append(L"User-Agent", userAgent);
-        }
-        catch (...)
-        {
-        }
-        co_return co_await client.GetAsync(Windows::Foundation::Uri{ url });
+        co_return co_await ClientFor(userAgent).GetAsync(Windows::Foundation::Uri{ url });
     }
 
     inline Windows::Foundation::IAsyncOperation<hstring> GetStringAsync(hstring url, hstring userAgent)

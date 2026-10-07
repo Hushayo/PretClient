@@ -81,6 +81,25 @@ namespace winrt::PretClient
         };
     } // namespace
 
+    // Single place that renders a DownloadState onto a card, so live
+    // updates and Refresh-restores can never disagree (and the bar can
+    // never jump backwards from two writers).
+    void InstancesPage::PaintProgress(InstancesPage::Card& card, hstring const& label,
+        unsigned long long done, unsigned long long total, double bps)
+    {
+        card.prog.IsIndeterminate(total == 0);
+        if (total > 0)
+            card.prog.Value(100.0 * static_cast<double>(done) / static_cast<double>(total));
+        wchar_t buf[256]{};
+        if (total > 0)
+            swprintf_s(buf, L"%s %s / %s (%s)", std::wstring{ label }.c_str(),
+                FormatBytes(done).c_str(), FormatBytes(total).c_str(), FormatSpeed(bps).c_str());
+        else
+            swprintf_s(buf, L"%s %s (%s)", std::wstring{ label }.c_str(),
+                FormatBytes(done).c_str(), FormatSpeed(bps).c_str());
+        card.progText.Text(buf);
+    }
+
     InstancesPage::InstancesPage()
     {
         m_root.Spacing(12);
@@ -147,6 +166,7 @@ namespace winrt::PretClient
         {
             bool running = Launcher::IsRunning(inst.id);
             bool isFabric = (inst.loader == L"fabric");
+            bool preparing = m_preparing.find(std::wstring{ inst.id }) != m_preparing.end();
 
             Border card{};
             card.Background(Theme::CardBrush());
@@ -155,28 +175,30 @@ namespace winrt::PretClient
             card.CornerRadius(CornerRadiusHelper::FromUniformRadius(8));
             card.Padding(ThicknessHelper::FromUniformLength(16));
 
-            Grid grid{};
-            grid.ColumnSpacing(16);
-            grid.ColumnDefinitions().Append(ColumnDefinition{});
-            grid.ColumnDefinitions().Append(ColumnDefinition{});
-            grid.ColumnDefinitions().GetAt(0).Width(GridLengthHelper::FromValueAndType(1.0, GridUnitType::Star));
-            grid.ColumnDefinitions().GetAt(1).Width(GridLengthHelper::Auto());
+            StackPanel body{};
+            body.Spacing(8);
 
-            StackPanel left{};
-            left.Spacing(6);
+            Grid head{};
+            head.ColumnSpacing(16);
+            head.ColumnDefinitions().Append(ColumnDefinition{});
+            head.ColumnDefinitions().Append(ColumnDefinition{});
+            head.ColumnDefinitions().GetAt(0).Width(GridLengthHelper::FromValueAndType(1.0, GridUnitType::Star));
+            head.ColumnDefinitions().GetAt(1).Width(GridLengthHelper::Auto());
+
+            StackPanel title{};
+            title.Orientation(Orientation::Horizontal);
+            title.Spacing(8);
 
             TextBlock name{};
             name.Text(inst.name);
             name.Style(Application::Current().Resources().Lookup(box_value(L"SubtitleTextBlockStyle")).as<Style>());
-            left.Children().Append(name);
-
-            StackPanel meta{};
-            meta.Orientation(Orientation::Horizontal);
-            meta.Spacing(8);
+            name.VerticalAlignment(VerticalAlignment::Center);
+            title.Children().Append(name);
 
             Border badge{};
             badge.CornerRadius(CornerRadiusHelper::FromUniformRadius(4));
             badge.Padding(ThicknessHelper::FromLengths(8, 4, 8, 4));
+            badge.VerticalAlignment(VerticalAlignment::Center);
             TextBlock badgeText{};
             if (isFabric)
             {
@@ -194,33 +216,35 @@ namespace winrt::PretClient
                 badgeText.Text(L"VANILLA");
             }
             badge.Child(badgeText);
-            meta.Children().Append(badge);
+            title.Children().Append(badge);
 
             TextBlock ver{};
             ver.Text(inst.mcVersion);
             ver.VerticalAlignment(VerticalAlignment::Center);
             ver.Opacity(0.8);
-            meta.Children().Append(ver);
-            left.Children().Append(meta);
+            title.Children().Append(ver);
+            Grid::SetColumn(title, 0);
+            head.Children().Append(title);
 
             TextBlock stats{};
             stats.Style(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>());
             stats.Opacity(0.7);
             stats.Text(running ? L"* starting..." : L"Idle");
-            left.Children().Append(stats);
+            body.Children().Append(head);
+            body.Children().Append(stats);
 
             ProgressBar prog{};
             prog.Minimum(0);
             prog.Maximum(100);
             prog.Visibility(Visibility::Collapsed);
-            left.Children().Append(prog);
+            body.Children().Append(prog);
 
             TextBlock progText{};
             progText.Style(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>());
             progText.Opacity(0.7);
             progText.Visibility(Visibility::Collapsed);
             progText.TextWrapping(TextWrapping::Wrap);
-            left.Children().Append(progText);
+            body.Children().Append(progText);
 
             TextBox gamelog{};
             gamelog.IsReadOnly(true);
@@ -231,7 +255,7 @@ namespace winrt::PretClient
             gamelog.FontFamily(FontFamily(L"Consolas"));
             gamelog.Visibility(running ? Visibility::Visible : Visibility::Collapsed);
             gamelog.Header(box_value(L"Client log"));
-            left.Children().Append(gamelog);
+            body.Children().Append(gamelog);
 
             if (isFabric)
             {
@@ -239,7 +263,7 @@ namespace winrt::PretClient
                 note.Style(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>());
                 note.Opacity(0.6);
                 note.Text(L"Fabric loader + Fabric API install automatically on Play.");
-                left.Children().Append(note);
+                body.Children().Append(note);
             }
 
             StackPanel buttons{};
@@ -251,7 +275,7 @@ namespace winrt::PretClient
             Button play{};
             play.Content(box_value(L"Play"));
             play.Style(Application::Current().Resources().Lookup(box_value(L"AccentButtonStyle")).as<Style>());
-            play.IsEnabled(!running);
+            play.IsEnabled(!running && !preparing);
             play.Click([this, id](IInspectable const&, RoutedEventArgs const&) { PlayInstance(id); });
 
             Button stop{};
@@ -265,7 +289,7 @@ namespace winrt::PretClient
 
             Button restart{};
             restart.Content(box_value(L"Restart"));
-            restart.IsEnabled(running);
+            restart.IsEnabled(running && !preparing);
             restart.Click([this, id](IInspectable const&, RoutedEventArgs const&) {
                 Launcher::Stop(id);
                 PlayInstance(id);
@@ -284,8 +308,15 @@ namespace winrt::PretClient
 
             Button del{};
             del.Content(box_value(L"Delete"));
-            del.IsEnabled(!running);
+            del.IsEnabled(!running && !preparing);
             del.Click([this, id](IInspectable const&, RoutedEventArgs const&) {
+                if (m_preparing.find(std::wstring{ id }) != m_preparing.end() ||
+                    Launcher::IsRunning(id))
+                {
+                    SetStatus(L"Stop it first.");
+                    return;
+                }
+                m_downloads.erase(std::wstring{ id });
                 auto all = LoadInstances();
                 all.erase(std::remove_if(all.begin(), all.end(),
                     [&](Instance const& i) { return i.id == id; }), all.end());
@@ -294,12 +325,10 @@ namespace winrt::PretClient
                 Refresh();
             });
             buttons.Children().Append(del);
-
-            Grid::SetColumn(left, 0);
             Grid::SetColumn(buttons, 1);
-            grid.Children().Append(left);
-            grid.Children().Append(buttons);
-            card.Child(grid);
+            head.Children().Append(buttons);
+
+            card.Child(body);
             m_cards.Children().Append(card);
 
             Card c{};
@@ -312,6 +341,16 @@ namespace winrt::PretClient
             c.progText = progText;
             c.gamelog = gamelog;
             m_cardList.push_back(std::move(c));
+            // Repaint a download that is still in flight (tab switch or any
+            // Refresh rebuilds the card collapsed by default).
+            if (auto dit = m_downloads.find(std::wstring{ id }); dit != m_downloads.end())
+            {
+                auto& back = m_cardList.back();
+                back.prog.Visibility(Visibility::Visible);
+                back.progText.Visibility(Visibility::Visible);
+                PaintProgress(back, dit->second.label, dit->second.done,
+                    dit->second.total, dit->second.bps);
+            }
         }
         UpdateStatsAsync();
     }
@@ -942,6 +981,19 @@ namespace winrt::PretClient
             SetStatus(L"Instance is gone.");
             co_return;
         }
+        // One prepare per instance: a second Play would start a duplicate
+        // download fighting over the same progress bar (and the same files).
+        if (Launcher::IsRunning(id))
+        {
+            SetStatus(L"Already running.");
+            co_return;
+        }
+        if (m_preparing.find(std::wstring{ id }) != m_preparing.end())
+        {
+            SetStatus(L"Already preparing (download in progress).");
+            co_return;
+        }
+        m_preparing.insert(std::wstring{ id });
         auto settings = LoadSettings();
         std::wstring gameDir{ EffectiveGameDir(settings) };
         auto instanceMods = InstanceModsDir(settings, id);
@@ -961,6 +1013,8 @@ namespace winrt::PretClient
         }
 
         auto fail = [this, id](hstring const& msg) {
+            m_preparing.erase(std::wstring{ id });
+            m_downloads.erase(std::wstring{ id });
             SetStatus(msg);
             if (auto* card = FindCard(id))
             {
@@ -992,20 +1046,13 @@ namespace winrt::PretClient
         SetStatus(hstring{ L"Preparing " } + inst.mcVersion + L"... (first run downloads game files)");
         auto logCb = [this](hstring const& line) { SetStatus(line); };
         auto progCb = [this, id](hstring file, unsigned long long done, unsigned long long total, double bps) {
-            auto* card = FindCard(id);
-            if (!card)
-                return;
-            card->prog.IsIndeterminate(total == 0);
-            if (total > 0)
-                card->prog.Value(100.0 * static_cast<double>(done) / static_cast<double>(total));
-            wchar_t buf[256]{};
-            if (total > 0)
-                swprintf_s(buf, L"%s %s / %s (%s)", std::wstring{ file }.c_str(),
-                    FormatBytes(done).c_str(), FormatBytes(total).c_str(), FormatSpeed(bps).c_str());
-            else
-                swprintf_s(buf, L"%s %s (%s)", std::wstring{ file }.c_str(),
-                    FormatBytes(done).c_str(), FormatSpeed(bps).c_str());
-            card->progText.Text(buf);
+            m_downloads[std::wstring{ id }] = DownloadState{ file, done, total, bps };
+            if (auto* card = FindCard(id))
+            {
+                card->prog.Visibility(Visibility::Visible);
+                card->progText.Visibility(Visibility::Visible);
+                PaintProgress(*card, file, done, total, bps);
+            }
         };
         Downloader::PrepareAsync(
             inst.mcVersion, inst.loader, inst.loaderVersion, gameDir,
@@ -1054,6 +1101,8 @@ namespace winrt::PretClient
             javaExe = Java::Pick(game.javaMajor);
 
         co_await ForegroundAwait{ m_dispatcher };
+        m_preparing.erase(std::wstring{ id });
+        m_downloads.erase(std::wstring{ id });
         if (javaExe.empty())
         {
             failed(hstring{ L"No Java " } + to_hstring(game.javaMajor) +

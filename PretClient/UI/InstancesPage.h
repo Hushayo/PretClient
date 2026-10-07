@@ -4,6 +4,8 @@
 #include "../System/Stats.h"
 #include <atomic>
 #include <filesystem>
+#include <map>
+#include <set>
 
 // Instances page: long cards with loader badge, version, live CPU/RAM/GPU,
 // game log, progress bar with speed, Play / Stop / Restart, per-instance
@@ -27,6 +29,17 @@ namespace winrt::PretClient
         void Refresh();
 
     private:
+        // Last known download progress per instance. Cards are rebuilt on
+        // every Refresh (including tab switches), so progress is stashed
+        // here and repainted onto the fresh card -- it never "poofs".
+        struct DownloadState
+        {
+            hstring label{};
+            unsigned long long done = 0;
+            unsigned long long total = 0;
+            double bps = 0.0;
+        };
+
         struct Card
         {
             hstring id{};
@@ -41,6 +54,11 @@ namespace winrt::PretClient
 
         Card* FindCard(hstring const& id);
         void SetStatus(hstring const& line);
+        // Single place that renders a DownloadState onto a card, so live
+        // updates and Refresh-restores can never disagree (and the bar can
+        // never jump backwards from two writers).
+        static void PaintProgress(Card& card, hstring const& label,
+            unsigned long long done, unsigned long long total, double bps);
         // Samples CPU/RAM/GPU + log tails on a background thread (PDH GPU
         // queries can stall for seconds on flaky drivers and must never run
         // on the UI thread), then applies the text updates on top of it.
@@ -78,5 +96,10 @@ namespace winrt::PretClient
         // Overlap guard: if one sample is still stuck (slow disk/PDH), the
         // next tick skips instead of stacking up.
         std::atomic<bool> m_statsBusy{ false };
+        std::map<std::wstring, DownloadState> m_downloads{};
+        // Instances with a prepare/download currently in flight. Blocks a
+        // second Play (which would start a duplicate download fighting over
+        // the same progress bar) until the first finishes or fails.
+        std::set<std::wstring> m_preparing{};
     };
 }
