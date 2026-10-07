@@ -14,6 +14,9 @@ namespace winrt::PretClient
 
     private:
         winrt::fire_and_forget CheckForUpdates();
+        // One-click self-update: download the setup in-app with progress,
+        // run it silent (it closes + replaces us), installer relaunches us.
+        winrt::fire_and_forget InstallUpdate(Microsoft::UI::Xaml::Controls::Button button);
 
         Microsoft::UI::Xaml::Controls::Grid m_host{};
         Microsoft::UI::Xaml::Controls::StackPanel m_banner{};

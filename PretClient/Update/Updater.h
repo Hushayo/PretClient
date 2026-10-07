@@ -19,6 +19,10 @@ bool IsNewerTag(winrt::hstring const& current, winrt::hstring const& latest);
 // Installer asset (.msix/.msixbundle/.exe) or the release page URL.
 winrt::hstring DownloadUrlFor(winrt::Windows::Data::Json::JsonObject const& release);
 
+// True when the URL is a setup exe we can download + run ourselves
+// (as opposed to the release-page fallback, which still opens a browser).
+bool IsInstallerUrl(winrt::hstring const& url);
+
 // Open a URL in the default browser.
 void OpenUrl(winrt::hstring const& url);
 }

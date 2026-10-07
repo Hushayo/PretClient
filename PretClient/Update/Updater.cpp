@@ -150,4 +150,13 @@ void OpenUrl(hstring const& url)
     if (!url.empty())
         ShellExecuteW(nullptr, L"open", url.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
 }
+
+bool IsInstallerUrl(hstring const& url)
+{
+    std::wstring lower{ std::wstring{ url } };
+    for (auto& c : lower)
+        c = static_cast<wchar_t>(towlower(c));
+    bool endsExe = lower.size() >= 4 && lower.compare(lower.size() - 4, 4, L".exe") == 0;
+    return endsExe && lower.find(L"setup") != std::wstring::npos;
+}
 }

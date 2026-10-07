@@ -1,7 +1,10 @@
 #include "pch.h"
 #include "MainWindow.h"
 #include "UI/Theme.h"
+#include "Minecraft/Http.h"
 #include "Update/Updater.h"
+#include <filesystem>
+#include <shellapi.h>
 
 using namespace winrt;
 using namespace Microsoft::UI::Xaml;
@@ -38,8 +41,8 @@ namespace winrt::PretClient
         m_updateText.VerticalAlignment(VerticalAlignment::Center);
         m_updateText.TextWrapping(TextWrapping::Wrap);
         Button updateButton{};
-        updateButton.Content(box_value(L"Download update"));
-        updateButton.Click([this](IInspectable const&, RoutedEventArgs const&) { Update::OpenUrl(m_updateUrl); });
+        updateButton.Content(box_value(L"Download and install"));
+        updateButton.Click([this, updateButton](IInspectable const&, RoutedEventArgs const&) { InstallUpdate(updateButton); });
         m_banner.Children().Append(m_updateText);
         m_banner.Children().Append(updateButton);
         Grid::SetRow(m_banner, 0);
@@ -114,5 +117,46 @@ namespace winrt::PretClient
             m_updateText.Text(L"Update available: " + current + L" -> " + latest);
             m_banner.Visibility(Visibility::Visible);
         }
+    }
+
+    fire_and_forget MainWindow::InstallUpdate(Button button)
+    {
+        if (m_updateUrl.empty())
+            co_return;
+        if (!Update::IsInstallerUrl(m_updateUrl))
+        {
+            Update::OpenUrl(m_updateUrl); // release-page fallback: no direct asset
+            co_return;
+        }
+        button.IsEnabled(false);
+        m_updateText.Text(L"Downloading update...");
+        auto dest = std::filesystem::temp_directory_path() / L"PretClient-Setup.exe";
+        hstring err = co_await Http::DownloadToFileAsync(m_updateUrl, dest, L"PretClient/1.0",
+            [this](unsigned long long done, unsigned long long total, double) {
+                if (total == 0)
+                    return;
+                wchar_t buf[128]{};
+                swprintf_s(buf, L"Downloading update... %llu%%", done * 100 / total);
+                m_updateText.Text(buf);
+            });
+        if (!err.empty())
+        {
+            m_updateText.Text(hstring{ L"Update download failed: " } + err);
+            button.IsEnabled(true);
+            co_return;
+        }
+        // Per-user install (no UAC): run it silent, let it replace us, exit
+        // now so no files are locked. The installer's postinstall entry
+        // relaunches the app when done.
+        m_updateText.Text(L"Installing update... the app will close and reopen.");
+        auto rc = ShellExecuteW(nullptr, L"open", dest.c_str(),
+            L"/SILENT /CLOSEAPPLICATIONS", nullptr, SW_SHOWNORMAL);
+        if (reinterpret_cast<INT_PTR>(rc) <= 32)
+        {
+            m_updateText.Text(L"Could not start installer.");
+            button.IsEnabled(true);
+            co_return;
+        }
+        Application::Current().Exit();
     }
 }

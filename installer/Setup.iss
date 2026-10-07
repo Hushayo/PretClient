@@ -31,4 +31,6 @@ Name: "{autodesktop}\PretClient"; Filename: "{app}\PretClient.exe"; Tasks: deskt
 Name: desktopicon; Description: "Create a desktop shortcut"; Flags: unchecked
 
 [Run]
-Filename: "{app}\PretClient.exe"; Description: "Launch PretClient"; Flags: nowait postinstall skipifsilent
+; No skipifsilent: silent installs (in-app update) relaunch the app too,
+; which is what makes one-click self-update reopen automatically.
+Filename: "{app}\PretClient.exe"; Description: "Launch PretClient"; Flags: nowait postinstall
