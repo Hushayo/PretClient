@@ -418,7 +418,7 @@ namespace winrt::PretClient
                 note.Foreground(Theme::GoodBrush());
                 note.Opacity(0.9);
                 note.TextWrapping(TextWrapping::Wrap);
-                note.Text(L"\u2139 Fabric loader + Fabric API install automatically on Play.");
+                note.Text(L"Fabric loader + Fabric API install automatically on Play.");
                 infoBar.Child(note);
                 body.Children().Append(infoBar);
             }
@@ -430,14 +430,14 @@ namespace winrt::PretClient
 
             hstring id = inst.id;
             Button play{};
-            play.Content(box_value(running ? L"\u25B6 Playing" : L"\u25B6 Play"));
+            play.Content(box_value(L"Play"));
             play.Style(Application::Current().Resources().Lookup(box_value(L"AccentButtonStyle")).as<Style>());
             play.MinWidth(88);
             play.IsEnabled(!running && !preparing);
             play.Click([this, id](IInspectable const&, RoutedEventArgs const&) { PlayInstance(id); });
 
             Button stop{};
-            stop.Content(box_value(L"\u25A0 Stop"));
+            stop.Content(box_value(L"Stop"));
             stop.IsEnabled(running);
             stop.Click([this, id](IInspectable const&, RoutedEventArgs const&) {
                 Launcher::Stop(id);
@@ -446,7 +446,7 @@ namespace winrt::PretClient
             });
 
             Button restart{};
-            restart.Content(box_value(L"\u21BB Restart"));
+            restart.Content(box_value(L"Restart"));
             restart.IsEnabled(running && !preparing);
             restart.Click([this, id](IInspectable const&, RoutedEventArgs const&) {
                 Launcher::Stop(id);
