@@ -3,8 +3,11 @@
 #include "Theme.h"
 #include "../Minecraft/Downloader.h"
 #include "../Minecraft/Fabric.h"
+#include "../Minecraft/Forge.h"
 #include "../Minecraft/Http.h"
 #include "../Minecraft/Modrinth.h"
+#include "../Minecraft/NeoForge.h"
+#include "../Minecraft/Quilt.h"
 #include <algorithm>
 #include <fstream>
 #include <shellapi.h>
@@ -176,7 +179,7 @@ namespace winrt::PretClient
         for (auto const& inst : instances)
         {
             bool running = Launcher::IsRunning(inst.id);
-            bool isFabric = (inst.loader == L"fabric");
+            bool isModded = (inst.loader != L"vanilla");
             bool preparing = m_preparing.find(std::wstring{ inst.id }) != m_preparing.end();
 
             // Status-driven accent so cards read at a glance.
@@ -255,8 +258,16 @@ namespace winrt::PretClient
             icon.BorderBrush(Theme::CardStroke());
             icon.BorderThickness(ThicknessHelper::FromUniformLength(1));
             icon.VerticalAlignment(VerticalAlignment::Center);
-            icon.Background(isFabric ? Theme::IconFabricBackground().as<Microsoft::UI::Xaml::Media::Brush>()
-                                     : Theme::IconVanillaBackground().as<Microsoft::UI::Xaml::Media::Brush>());
+            if (inst.loader == L"fabric")
+                icon.Background(Theme::IconFabricBackground().as<Microsoft::UI::Xaml::Media::Brush>());
+            else if (inst.loader == L"quilt")
+                icon.Background(Theme::IconQuiltBackground().as<Microsoft::UI::Xaml::Media::Brush>());
+            else if (inst.loader == L"forge")
+                icon.Background(Theme::IconForgeBackground().as<Microsoft::UI::Xaml::Media::Brush>());
+            else if (inst.loader == L"neoforge")
+                icon.Background(Theme::IconNeoForgeBackground().as<Microsoft::UI::Xaml::Media::Brush>());
+            else
+                icon.Background(Theme::IconVanillaBackground().as<Microsoft::UI::Xaml::Media::Brush>());
             wchar_t initialCh = L'?';
             try
             {
@@ -274,16 +285,18 @@ namespace winrt::PretClient
             initial.FontSize(20);
             initial.FontWeight(Windows::UI::Text::FontWeights::Bold());
             initial.Foreground(Theme::IconForeground());
-            // Loader logo in the tile (official Fabric mark / vanilla grass
-            // block shipped in Assets/); initial letter stays as fallback.
+            // Loader logo in the tile (per-loader mark shipped in Assets/;
+            // initial letter stays as fallback when no art exists yet).
             bool logoOk = false;
             try
             {
                 wchar_t exe[MAX_PATH]{};
                 if (GetModuleFileNameW(nullptr, exe, MAX_PATH) > 0)
                 {
-                    auto art = std::filesystem::path{ exe }.parent_path() / L"Assets" /
-                        (isFabric ? L"fabric.png" : L"vanilla.png");
+                    std::wstring artFile = isModded
+                        ? std::wstring{ inst.loader } + L".png"
+                        : std::wstring{ L"vanilla.png" };
+                    auto art = std::filesystem::path{ exe }.parent_path() / L"Assets" / artFile;
                     std::error_code ec;
                     if (std::filesystem::exists(art, ec))
                     {
@@ -339,11 +352,14 @@ namespace winrt::PretClient
             TextBlock badgeText{};
             badgeText.FontSize(11);
             badgeText.FontWeight(Windows::UI::Text::FontWeights::Bold());
-            if (isFabric)
+            if (isModded)
             {
                 badge.Background(SolidColorBrush{ Windows::UI::ColorHelper::FromArgb(38, 0x44, 0xBD, 0x32) });
                 badgeText.Foreground(Theme::GoodBrush());
-                hstring label = L"FABRIC";
+                std::wstring upper{ inst.loader };
+                for (auto& c : upper)
+                    c = static_cast<wchar_t>(towupper(c));
+                hstring label{ upper };
                 if (!inst.loaderVersion.empty())
                     label = label + L" " + inst.loaderVersion;
                 badgeText.Text(label);
@@ -479,7 +495,7 @@ namespace winrt::PretClient
             buttons.Children().Append(stop);
             buttons.Children().Append(restart);
 
-            if (isFabric)
+            if (isModded)
             {
                 Button modsBtn{};
                 modsBtn.Content(box_value(L"Mods"));
@@ -544,13 +560,15 @@ namespace winrt::PretClient
     {
         // One row of the mods dialog: what file it is plus the live widgets
         // an async update check may want to touch later. Name/version/icon
-        // come from the jar's fabric.mod.json (never the filename).
+        // come from the jar's fabric.mod.json (or quilt.mod.json for
+        // quilt-native mods) -- never the filename.
         struct ModMeta
         {
             hstring modId{};
             hstring name{};
             hstring version{};
             hstring icon{}; // path inside the jar, "" when none
+            hstring metaLoader{}; // "fabric" | "quilt" | "" (unknown)
         };
 
         struct ModRow
@@ -573,22 +591,58 @@ namespace winrt::PretClient
             try
             {
                 std::string text;
-                if (!Http::ZipEntryToString(jar, L"fabric.mod.json", text) || text.empty())
-                    return m;
-                auto o = JsonObject::Parse(to_hstring(text));
-                try
+                if (Http::ZipEntryToString(jar, L"fabric.mod.json", text) && !text.empty())
                 {
-                    if (o.HasKey(L"id"))
-                        m.modId = o.GetNamedString(L"id");
-                    if (o.HasKey(L"name"))
-                        m.name = o.GetNamedString(L"name");
-                    if (o.HasKey(L"version"))
-                        m.version = o.GetNamedString(L"version");
-                    if (o.HasKey(L"icon"))
-                        m.icon = o.GetNamedString(L"icon");
+                    auto o = JsonObject::Parse(to_hstring(text));
+                    try
+                    {
+                        if (o.HasKey(L"id"))
+                            m.modId = o.GetNamedString(L"id");
+                        if (o.HasKey(L"name"))
+                            m.name = o.GetNamedString(L"name");
+                        if (o.HasKey(L"version"))
+                            m.version = o.GetNamedString(L"version");
+                        if (o.HasKey(L"icon"))
+                            m.icon = o.GetNamedString(L"icon");
+                    }
+                    catch (...)
+                    {
+                    }
+                    if (!m.modId.empty())
+                    {
+                        m.metaLoader = L"fabric";
+                        return m;
+                    }
                 }
-                catch (...)
+                // Quilt-native mods carry quilt.mod.json instead.
+                text.clear();
+                if (Http::ZipEntryToString(jar, L"quilt.mod.json", text) && !text.empty())
                 {
+                    auto o = JsonObject::Parse(to_hstring(text));
+                    try
+                    {
+                        if (o.HasKey(L"quilt_loader"))
+                        {
+                            auto q = o.GetNamedObject(L"quilt_loader");
+                            if (q.HasKey(L"id"))
+                                m.modId = q.GetNamedString(L"id");
+                            if (q.HasKey(L"version"))
+                                m.version = q.GetNamedString(L"version");
+                            if (q.HasKey(L"metadata"))
+                            {
+                                auto md = q.GetNamedObject(L"metadata");
+                                if (md.HasKey(L"name"))
+                                    m.name = md.GetNamedString(L"name");
+                                if (md.HasKey(L"icon"))
+                                    m.icon = md.GetNamedString(L"icon");
+                            }
+                        }
+                    }
+                    catch (...)
+                    {
+                    }
+                    if (!m.modId.empty())
+                        m.metaLoader = L"quilt";
                 }
             }
             catch (...)
@@ -685,7 +739,7 @@ namespace winrt::PretClient
             }
         }
 
-        // Read one jar's fabric.mod.json off the UI thread, cache it, then
+        // Read one jar's mod metadata off the UI thread, cache it, then
         // fill the row's name/version and kick its icon load.
         fire_and_forget EnsureModMeta(std::filesystem::path jar,
             std::shared_ptr<ModMetaCache> cache,
@@ -824,9 +878,10 @@ namespace winrt::PretClient
                 row.status.Text(msg);
         }
 
-        // Ask Modrinth for the newest build of this mod on (mc, fabric) and,
-        // when it is newer than the jar's own fabric.mod.json version, add an
-        // Update button to the row.
+        // Ask Modrinth for the newest build of this mod on (mc, loader) and,
+        // when it is newer than the jar's own embedded version, add an
+        // Update button to the row. The loader comes from whichever metadata
+        // the jar actually carries (fabric.mod.json / quilt.mod.json).
         fire_and_forget CheckModUpdate(ModRow row, hstring mc, std::function<void()> refresh)
         {
             try
@@ -843,7 +898,8 @@ namespace winrt::PretClient
                     row.status.Text(hstring{ L"checking " } + modId + L"...");
 
                 VersionsWaiter wait{};
-                Modrinth::GetVersionsAsync(modId, mc, L"fabric",
+                hstring queryLoader = row.meta.metaLoader.empty() ? hstring{ L"fabric" } : row.meta.metaLoader;
+                Modrinth::GetVersionsAsync(modId, mc, queryLoader,
                     [&wait](std::vector<Modrinth::ModVersion> versions) {
                         wait.versions = std::move(versions);
                         wait.done = true;
@@ -918,7 +974,7 @@ namespace winrt::PretClient
     void InstancesPage::StageMods(std::filesystem::path const& instanceMods,
         std::filesystem::path const& gameMods)
     {
-        // Fabric only reads <gameDir>/mods, but game files are shared by all
+        // Every loader reads <gameDir>/mods, but game files are shared by all
         // instances, so the instance's own folder is staged in right before
         // launch. *.jar.disabled files are deliberately left behind.
         try
@@ -1284,8 +1340,6 @@ namespace winrt::PretClient
         co_await dialog.ShowAsync();
     }
 
-    fire_and_forget InstancesPage::AddDialog()
-
     hstring InstancesPage::TailText(std::filesystem::path const& file)
     {
         try
@@ -1483,7 +1537,7 @@ namespace winrt::PretClient
         std::wstring gameDir{ EffectiveGameDir(settings) };
         auto instanceMods = InstanceModsDir(settings, id);
         auto gameMods = std::filesystem::path{ gameDir } / L"mods";
-        bool isFabric = (inst.loader == L"fabric");
+        bool isModded = (inst.loader != L"vanilla");
         hstring username = settings.username.empty() ? hstring{ L"Steve" } : settings.username;
         hstring javaPath = settings.javaPath;
         int minMem = settings.minMemMb;
@@ -1520,20 +1574,28 @@ namespace winrt::PretClient
             Refresh();
         };
 
-        if (inst.loader == L"fabric" && inst.loaderVersion.empty())
+        if (inst.loader != L"vanilla" && inst.loaderVersion.empty())
         {
-            SetStatus(L"Resolving fabric loader...");
+            hstring kind = inst.loader; // fabric | quilt | forge | neoforge
+            SetStatus(hstring{ L"Resolving " } + kind + hstring{ L" loader..." });
             hstring loaderVer;
             try
             {
-                loaderVer = co_await Fabric::GetLatestLoader(inst.mcVersion);
+                if (kind == L"fabric")
+                    loaderVer = co_await Fabric::GetLatestLoader(inst.mcVersion);
+                else if (kind == L"quilt")
+                    loaderVer = co_await Quilt::GetLatestLoader(inst.mcVersion);
+                else if (kind == L"forge")
+                    loaderVer = co_await Forge::GetLatestForge(inst.mcVersion);
+                else if (kind == L"neoforge")
+                    loaderVer = co_await NeoForge::GetLatestNeoForge(inst.mcVersion);
             }
             catch (...)
             {
             }
             if (loaderVer.empty())
             {
-                fail(hstring{ L"No fabric loader for " } + inst.mcVersion);
+                fail(hstring{ L"No " } + kind + hstring{ L" loader for " } + inst.mcVersion);
                 co_return;
             }
             inst.loaderVersion = loaderVer;
@@ -1552,9 +1614,10 @@ namespace winrt::PretClient
         };
         Downloader::PrepareAsync(
             inst.mcVersion, inst.loader, inst.loaderVersion, gameDir,
-            isFabric ? std::wstring{ instanceMods.wstring() } : std::wstring{},
+            isModded ? std::wstring{ instanceMods.wstring() } : std::wstring{},
+            javaPath,
             logCb, progCb,
-            [this, id, username, javaPath, minMem, maxMem, fail, isFabric, instanceMods, gameMods](
+            [this, id, username, javaPath, minMem, maxMem, fail, isModded, instanceMods, gameMods](
                 bool ok, Downloader::PreparedGame game, hstring error) {
                 if (!ok)
                 {
@@ -1562,12 +1625,12 @@ namespace winrt::PretClient
                     return;
                 }
                 FinishLaunch(id, username, javaPath, minMem, maxMem,
-                    std::move(game), isFabric, instanceMods, gameMods);
+                    std::move(game), isModded, instanceMods, gameMods);
             });
     }
 
     fire_and_forget InstancesPage::FinishLaunch(hstring id, hstring username, hstring javaPath,
-        int minMem, int maxMem, Downloader::PreparedGame game, bool isFabric,
+        int minMem, int maxMem, Downloader::PreparedGame game, bool isModded,
         std::filesystem::path instanceMods, std::filesystem::path gameMods)
     {
         auto failed = [this, id](hstring const& msg) {
@@ -1584,7 +1647,7 @@ namespace winrt::PretClient
         co_await winrt::resume_background();
         // Everything down to the foreground hop may block (disk copies,
         // java -version probes with long waits) and now runs off the UI.
-        if (isFabric)
+        if (isModded)
             StageMods(instanceMods, gameMods);
         hstring javaExe = javaPath;
         if (!javaExe.empty())
@@ -1654,10 +1717,13 @@ namespace winrt::PretClient
         loaderBox.Header(box_value(L"Loader"));
         loaderBox.Items().Append(box_value(L"vanilla"));
         loaderBox.Items().Append(box_value(L"fabric"));
+        loaderBox.Items().Append(box_value(L"quilt"));
+        loaderBox.Items().Append(box_value(L"forge"));
+        loaderBox.Items().Append(box_value(L"neoforge"));
         loaderBox.SelectedIndex(0);
 
         TextBox loaderVerBox{};
-        loaderVerBox.Header(box_value(L"Fabric loader version (empty = latest)"));
+        loaderVerBox.Header(box_value(L"Loader version (empty = latest)"));
 
         StackPanel panel{};
         panel.Spacing(8);
