@@ -242,6 +242,16 @@ namespace winrt::PretClient::Downloader
                     break;
                 }
                 ++b->completed;
+                // Credit bytes for files that were already present+valid:
+                // FetchFile reports no progress for those, so without this a
+                // fully-cached batch reads "81/81 0 KB / 86 MB" and the bar
+                // never fills.
+                if (job.size > 0 &&
+                    static_cast<unsigned long long>(job.size) > job.lastDone)
+                {
+                    b->doneBytes += static_cast<unsigned long long>(job.size) - job.lastDone;
+                    job.lastDone = static_cast<unsigned long long>(job.size);
+                }
             }
             b->wg.Done();
         }

@@ -175,6 +175,11 @@ namespace winrt::PretClient::Java
                             nullptr, nullptr, &si, &pi))
                     {
                         WaitForSingleObject(pi.hProcess, 10000);
+                        // Close OUR copy of the write end first: otherwise the
+                        // read loop below can never see EOF and blocks forever
+                        // (this hung Java detection on every launch).
+                        CloseHandle(w);
+                        w = nullptr;
                         char buf[4096];
                         DWORD got = 0;
                         std::string raw;
@@ -202,7 +207,8 @@ namespace winrt::PretClient::Java
                                 break;
                         }
                     }
-                    CloseHandle(w);
+                    if (w)
+                        CloseHandle(w);
                     CloseHandle(r);
                 }
             }
