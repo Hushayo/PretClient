@@ -73,7 +73,7 @@ IAsyncOperation<JsonObject> GetLatestReleaseAsync()
 
 hstring CurrentVersionTag()
 {
-    return L"v0.0.1";
+    return L"v1.0.0";
 }
 
 bool IsNewerTag(hstring const& current, hstring const& latest)

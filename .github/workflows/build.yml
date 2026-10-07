@@ -15,6 +15,9 @@ on:
         default: false
         type: boolean
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: windows-2022
@@ -25,6 +28,19 @@ jobs:
 
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
+
+      # Keep the in-app updater's baseline in sync with the VERSION file the
+      # auto-tag workflow maintains (stamp into source, never committed, so
+      # this cannot feed back into the tag loop).
+      - name: Stamp updater version from VERSION
+        shell: pwsh
+        run: |
+          $v = (Get-Content VERSION).Trim()
+          $f = "PretClient/Update/Updater.cpp"
+          $t = Get-Content $f -Raw
+          $t = $t -replace 'return L"v[0-9]+\.[0-9]+\.[0-9]+[^"]*";', ('return L"v' + $v + '";')
+          Set-Content $f $t -NoNewline
+          Write-Host "Stamped updater baseline v$v"
 
       - name: Build x64 Release (unpackaged exe)
         run: msbuild PretClient.sln /restore /p:Configuration=Release /p:Platform=x64 /verbosity:minimal
@@ -62,3 +78,14 @@ jobs:
           name: PretClient-Setup
           path: installer/Output/PretClient-Setup.exe
           if-no-files-found: error
+
+      # The in-app updater polls GitHub Releases, so tag builds must publish
+      # one with the installer attached (and workflow runs on a tag ref mean
+      # github.ref_type == 'tag' even when dispatched by the auto-tag job).
+      - name: Publish GitHub Release
+        if: ${{ success() && github.ref_type == 'tag' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$env:GITHUB_REF_NAME" "installer/Output/PretClient-Setup.exe" --title "$env:GITHUB_REF_NAME" --generate-notes
+        shell: pwsh

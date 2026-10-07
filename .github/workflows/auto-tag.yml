@@ -13,6 +13,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 jobs:
   tag:
@@ -78,3 +79,15 @@ jobs:
             git tag "$TAG"
             git push origin "$TAG"
           fi
+
+      # Tag pushes made with the default GITHUB_TOKEN do not start other
+      # workflows, so kick the build explicitly: it builds the installer and
+      # publishes the GitHub Release the in-app updater polls.
+      - name: Trigger release build
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=$(cat VERSION)
+          TAG="v${VERSION}"
+          gh workflow run "Build WinUI 3 (C++)" --ref "$TAG"
+
