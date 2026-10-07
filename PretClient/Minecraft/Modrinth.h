@@ -35,15 +35,15 @@ namespace winrt::PretClient::Modrinth
         std::vector<ModFile> files{};
     };
 
-    using SearchFn = std::function<void(SearchResult)>;
-    using VersionsFn = std::function<void(std::vector<ModVersion>)>;
-    using PickFn = std::function<void(ModFile)>;
-
     struct SearchResult
     {
         std::vector<ModHit> hits{};
         long long total = 0;
     };
+
+    using SearchFn = std::function<void(SearchResult)>;
+    using VersionsFn = std::function<void(std::vector<ModVersion>)>;
+    using PickFn = std::function<void(ModFile)>;
 
     winrt::fire_and_forget SearchAsync(
         hstring query, hstring mcVersion, hstring loader, int offset, SearchFn done);
