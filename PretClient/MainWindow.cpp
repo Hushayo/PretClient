@@ -180,6 +180,7 @@ namespace winrt::PretClient
                 Update::OpenUrl(hstring{ a.substr(prefix.size()) });
         });
         CheckForUpdates();
+        StartUpdatePolling();
     }
 
     void MainWindow::RefreshProfileAvatar()
@@ -254,22 +255,50 @@ namespace winrt::PretClient
         }
     } // namespace
 
-    fire_and_forget MainWindow::CheckForUpdates()
+    void MainWindow::StartUpdatePolling()
+    {
+        try
+        {
+            // Held in a member like m_fadeTimer: an unreferenced timer can die
+            // and silently stop polling.
+            m_updateTimer =
+                Microsoft::UI::Dispatching::DispatcherQueue::GetForCurrentThread().CreateTimer();
+            m_updateTimer.Interval(std::chrono::hours{ 6 });
+            m_updateTimer.Tick([this](auto&&, auto&&) {
+                CheckForUpdates(/*silent=*/true);
+            });
+            m_updateTimer.Start();
+        }
+        catch (...)
+        {
+        }
+    }
+
+    fire_and_forget MainWindow::CheckForUpdates(bool silent)
     {
         JsonObject release = co_await Update::GetLatestReleaseAsync();
         if (!release)
         {
-            m_settings.SetStatus(L"Could not check for updates (offline?).");
+            // Background polls stay quiet offline so they never overwrite a
+            // meaningful Settings status line; manual/startup checks report it.
+            if (!silent)
+                m_settings.SetStatus(L"Could not check for updates (offline?).");
             co_return;
         }
         hstring latest = release.GetNamedString(L"tag_name", L"");
         hstring current = Update::CurrentVersionTag();
         if (!latest.empty() && Update::IsNewerTag(current, latest))
         {
+            // One toast per version for background polls: a new release
+            // published mid-session still notifies, but the 6h poll doesn't
+            // re-toast the same tag forever. Manual checks always re-notify.
+            if (silent && latest == m_lastNotifiedTag)
+                co_return;
+            m_lastNotifiedTag = latest;
             m_settings.SetStatus(hstring{ L"Update " } + latest + L" available — see notification.");
             Update::Toast::ShowAvailable(current, latest);
         }
-        else
+        else if (!silent)
         {
             m_settings.SetStatus(L"PretClient " + current + L" is up to date.");
         }

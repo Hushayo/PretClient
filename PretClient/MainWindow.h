@@ -9,7 +9,8 @@
 // Sidebar shell: NavigationView (Instances / Mods / Local Server / Settings) + version
 // footer. Pages are built in code and swapped on selection. Self-update has
 // no in-window UI: CheckForUpdates raises a Windows toast (AppNotifications,
-// in-process buttons), and InstallUpdateLatest() runs the one-click flow.
+// in-process buttons) on startup, on manual check, and on a 6h background
+// poll while open, and InstallUpdateLatest() runs the one-click flow.
 namespace winrt::PretClient
 {
     struct MainWindow : Microsoft::UI::Xaml::WindowT<MainWindow>
@@ -22,7 +23,10 @@ namespace winrt::PretClient
         winrt::fire_and_forget InstallUpdateLatest();
 
     private:
-        winrt::fire_and_forget CheckForUpdates();
+        winrt::fire_and_forget CheckForUpdates(bool silent = false);
+        // Background poll: re-checks GitHub Releases every few hours while
+        // the app is open so a release published mid-session still toasts.
+        void StartUpdatePolling();
         // 160ms fade-in for tab content swaps. The timer is held in a member:
         // a timer nobody references can die mid-fade and leave the page stuck
         // at opacity 0 (invisible). Any failure restores opacity instead.
@@ -46,5 +50,11 @@ namespace winrt::PretClient
         SettingsPage m_settings{};
         // Update in flight (toast-driven). Blocks a second InstallUpdateLatest.
         bool m_updating = false;
+        // Periodic update poll (kept in a member so it survives). Fires while
+        // the window is open; each tick re-resolves the latest release.
+        Microsoft::UI::Dispatching::DispatcherQueueTimer m_updateTimer{ nullptr };
+        // Last version we already toasted for — stops the poll re-notifying
+        // every interval for the same release.
+        hstring m_lastNotifiedTag{};
     };
 }
