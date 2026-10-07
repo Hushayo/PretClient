@@ -1,15 +1,31 @@
-# PretClient — WinUI 3 (C++/WinRT)
+# PretClient — fancy Minecraft launcher (WinUI 3, C++, unpackaged)
 
-Blank packaged WinUI 3 desktop app in C++. `App.OnLaunched` creates and activates `MainWindow` (`PretClient/MainWindow.xaml:1`).
+Offline-first launcher client. No MSIX — plain exe + custom Inno Setup installer.
 
 ## Layout
 - `PretClient.sln` — solution (x86/x64/ARM64, Debug/Release)
-- `PretClient/PretClient.vcxproj` — C++20, `EnableXamlGeneratedMain`, WASDK 1.8.260921001, CppWinRT 2.0.250303.1
-- `PretClient/Package.appxmanifest` — packaged identity, min 10.0.17763.0
-- `PretClient/App.xaml`, `App.idl`, `App.xaml.h`, `App.xaml.cpp` — app entry
-- `PretClient/MainWindow.xaml`, `MainWindow.idl`, `MainWindow.xaml.h`, `MainWindow.xaml.cpp` — window, button + text
-- `PretClient/Assets/` — placeholder logos (replace with real art)
+- `PretClient/PretClient.vcxproj` — C++20, `WindowsPackageType=None`, self-contained WASDK 1.8
+- `PretClient/main.cpp` — bootstrap (`MddBootstrapInitialize`) + `Application::Start`
+- `PretClient/App.h`, `App.cpp` — app object, merges `XamlControlsResources`
+- `PretClient/MainWindow.h`, `MainWindow.cpp` — launcher window, built in code (no XAML):
+  username box, version combo, Play button, progress, log, update banner
+- `PretClient/Update/Updater.h`, `Updater.cpp` — checks GitHub Releases for a newer
+  `PretClient-Setup.exe`, opens it in the browser (no manual re-download hunting)
+- `installer/Setup.iss` — Inno Setup script, per-user install, no admin needed
+- `.github/workflows/build.yml` — CI: MSBuild x64 Release, build setup, upload artifact
 
-## Run
-F5 in VS (packaged deploy). The window title is set in `PretClient/MainWindow.xaml.cpp:18`.
-Button handler is `MainWindow::myButton_Click` in `PretClient/MainWindow.xaml.cpp:30`.
+## Build locally
+Requires: VS 2022 17.x Build Tools with MSVC v143 + Windows 11 SDK (what CI uses too).
+Raw `msbuild` needs no VS IDE. From a dev shell:
+
+```powershell
+msbuild PretClient.sln /restore /p:Configuration=Release /p:Platform=x64
+```
+
+Run `x64\Release\PretClient.exe` directly — no deploy/install step.
+Build the installer with Inno Setup 6: `ISCC.exe installer\Setup.iss`.
+
+## V1 scope
+- Fancy shell + offline (non-premium) usernames + self-update via Releases.
+- Play is a stub (fake progress + log). Real work next: version manifest,
+  Java locate, offline launch (`OfflinePlayer:<name>` UUID), then file downloads.

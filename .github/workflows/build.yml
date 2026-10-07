@@ -17,11 +17,8 @@ jobs:
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
 
-      - name: Setup NuGet
-        uses: NuGet/setup-nuget@v2
-
-      - name: Build x64 Release (unsigned MSIX for CI)
-        run: msbuild PretClient.sln /restore /p:Configuration=Release /p:Platform=x64 /p:AppxPackageSigningEnabled=false /p:AppxTestSigningEnabled=false /p:AppxBundle=Never /p:GenerateAppxPackageOnBuild=true /verbosity:minimal
+      - name: Build x64 Release (unpackaged exe)
+        run: msbuild PretClient.sln /restore /p:Configuration=Release /p:Platform=x64 /verbosity:minimal
 
       - name: List outputs
         if: always()
@@ -29,13 +26,20 @@ jobs:
           if (Test-Path x64/Release) { Get-ChildItem -Recurse x64/Release | Select-Object FullName -First 50 } else { echo "no x64/Release outputs" }
         shell: pwsh
 
-      - name: Upload MSIX + exe
+      - name: Install Inno Setup
+        if: success()
+        run: choco install innosetup --no-progress -y
+        shell: pwsh
+
+      - name: Build custom setup
+        if: success()
+        run: & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /DMyAppVersion="0.0.1-dev+${{ github.run_number }}" installer\Setup.iss
+        shell: pwsh
+
+      - name: Upload setup
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: PretClient-x64-Release
-          path: |
-            x64/Release/**/*.msix
-            x64/Release/**/*.exe
-            x64/Release/AppxManifest.xml
-          if-no-files-found: warn
+          name: PretClient-Setup
+          path: installer/Output/PretClient-Setup.exe
+          if-no-files-found: error
