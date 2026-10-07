@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "MainWindow.h"
+#include "UI/Theme.h"
 #include "Update/Updater.h"
 
 using namespace winrt;
@@ -8,150 +9,110 @@ using namespace Microsoft::UI::Xaml::Controls;
 using namespace Microsoft::UI::Xaml::Media;
 using namespace Windows::Data::Json;
 using namespace Windows::Foundation;
-using namespace std::chrono_literals;
 
 namespace winrt::PretClient
 {
     MainWindow::MainWindow()
     {
-        Title(L"PretClient \u2014 Minecraft Launcher");
+        Title(L"PretClient — Minecraft Launcher");
         SystemBackdrop(MicaBackdrop{});
+        try
+        {
+            AppWindow().Resize(Windows::Graphics::SizeInt32{ 1160, 760 });
+        }
+        catch (...)
+        {
+        }
 
-        ScrollViewer root{};
-        root.Padding(ThicknessHelper::FromUniformLength(24));
+        Grid root{};
+        root.RowDefinitions().Append(RowDefinition{});
+        root.RowDefinitions().Append(RowDefinition{});
+        root.RowDefinitions().GetAt(0).Height(GridLengthHelper::Auto());
+        root.RowDefinitions().GetAt(1).Height(GridLengthHelper::FromValueAndType(1.0, GridUnitType::Star));
 
-        StackPanel layout{};
-        layout.Spacing(12);
-        layout.MaxWidth(560);
-
-        TextBlock title{};
-        title.Text(L"PretClient");
-        title.Style(Application::Current().Resources().Lookup(box_value(L"TitleLargeTextBlockStyle")).as<Style>());
-
-        TextBlock subtitle{};
-        subtitle.Text(L"Fancy Minecraft launcher \u2014 offline first");
-        subtitle.Opacity(0.7);
-
-        TextBlock version{};
-        version.Text(Update::CurrentVersionTag() + L" (offline first)");
-        version.Opacity(0.6);
-
-        m_updateBanner.Orientation(Orientation::Horizontal);
-        m_updateBanner.Spacing(12);
-        m_updateBanner.Padding(ThicknessHelper::FromUniformLength(12));
-        m_updateBanner.CornerRadius(CornerRadiusHelper::FromUniformRadius(8));
-        m_updateBanner.Visibility(Visibility::Collapsed);
+        m_banner.Orientation(Orientation::Horizontal);
+        m_banner.Spacing(12);
+        m_banner.Padding(ThicknessHelper::FromLengths(24, 12, 24, 12));
+        m_banner.Visibility(Visibility::Collapsed);
+        m_banner.Background(SolidColorBrush{ Windows::UI::ColorHelper::FromArgb(38, 0x44, 0xBD, 0x32) });
         m_updateText.VerticalAlignment(VerticalAlignment::Center);
         m_updateText.TextWrapping(TextWrapping::Wrap);
         Button updateButton{};
         updateButton.Content(box_value(L"Download update"));
-        updateButton.Click([this](IInspectable const&, RoutedEventArgs const&) { OnUpdateClicked(); });
-        m_updateBanner.Children().Append(m_updateText);
-        m_updateBanner.Children().Append(updateButton);
+        updateButton.Click([this](IInspectable const&, RoutedEventArgs const&) { Update::OpenUrl(m_updateUrl); });
+        m_banner.Children().Append(m_updateText);
+        m_banner.Children().Append(updateButton);
+        Grid::SetRow(m_banner, 0);
+        root.Children().Append(m_banner);
 
-        m_username.Header(box_value(L"Username (offline)"));
-        m_username.PlaceholderText(L"Steve");
-        m_username.MaxLength(16);
+        NavigationView nav{};
+        nav.IsBackButtonVisible(NavigationViewBackButtonVisible::Collapsed);
+        nav.IsSettingsVisible(false);
+        nav.PaneTitle(L"PretClient");
 
-        m_versions.Header(box_value(L"Version"));
-        m_versions.Items().Append(box_value(L"1.21.4 (vanilla)"));
-        m_versions.Items().Append(box_value(L"1.20.4 (vanilla)"));
-        m_versions.Items().Append(box_value(L"1.8.9 (vanilla)"));
-        m_versions.SelectedIndex(0);
+        m_navInstances.Content(box_value(L"Instances"));
+        m_navInstances.Icon(SymbolIcon(Symbol::Library));
+        m_navInstances.Tag(box_value(L"instances"));
+        m_navMods.Content(box_value(L"Mods"));
+        m_navMods.Icon(SymbolIcon(Symbol::Download));
+        m_navMods.Tag(box_value(L"mods"));
+        m_navSettings.Content(box_value(L"Settings"));
+        m_navSettings.Icon(SymbolIcon(Symbol::Setting));
+        m_navSettings.Tag(box_value(L"settings"));
+        nav.MenuItems().Append(m_navInstances);
+        nav.MenuItems().Append(m_navMods);
+        nav.MenuItems().Append(m_navSettings);
 
-        m_play.Content(box_value(L"Play (offline)"));
-        m_play.Style(Application::Current().Resources().Lookup(box_value(L"AccentButtonStyle")).as<Style>());
-        m_play.HorizontalAlignment(HorizontalAlignment::Stretch);
-        m_play.Height(40);
-        m_play.Click([this](IInspectable const&, RoutedEventArgs const&) { OnPlayClicked(); });
+        nav.PaneTitle(hstring{ L"PretClient " } + Update::CurrentVersionTag());
 
-        m_progress.IsIndeterminate(true);
-        m_progress.Visibility(Visibility::Collapsed);
+        nav.Content(m_host);
+        nav.SelectionChanged([this](NavigationView const&, NavigationViewSelectionChangedEventArgs const& args) {
+            hstring tag;
+            try
+            {
+                tag = unbox_value_or<hstring>(args.SelectedItem().as<NavigationViewItem>().Tag(), L"");
+            }
+            catch (...)
+            {
+            }
+            m_host.Children().Clear();
+            if (tag == L"mods")
+            {
+                m_mods.RefreshInstances();
+                m_host.Children().Append(m_mods.Root());
+            }
+            else if (tag == L"settings")
+            {
+                m_settings.Refresh();
+                m_host.Children().Append(m_settings.Root());
+            }
+            else
+            {
+                m_instances.Refresh();
+                m_host.Children().Append(m_instances.Root());
+            }
+        });
+        Grid::SetRow(nav, 1);
+        root.Children().Append(nav);
 
-        m_log.Header(box_value(L"Log"));
-        m_log.IsReadOnly(true);
-        m_log.AcceptsReturn(true);
-        m_log.TextWrapping(TextWrapping::Wrap);
-        m_log.MinHeight(160);
-        m_log.MaxHeight(320);
-        m_log.FontFamily(FontFamily(L"Consolas"));
-
-        layout.Children().Append(title);
-        layout.Children().Append(subtitle);
-        layout.Children().Append(version);
-        layout.Children().Append(m_updateBanner);
-        layout.Children().Append(m_username);
-        layout.Children().Append(m_versions);
-        layout.Children().Append(m_play);
-        layout.Children().Append(m_progress);
-        layout.Children().Append(m_log);
-
-        root.Content(layout);
         Content(root);
+        nav.SelectedItem(m_navInstances);
 
-        AppendLog(L"PretClient ready. Enter a username and press Play.");
         CheckForUpdates();
-    }
-
-    void MainWindow::OnPlayClicked()
-    {
-        hstring username = m_username.Text();
-        if (username.empty())
-        {
-            username = L"Steve";
-            m_username.Text(username);
-        }
-        hstring version = L"1.21.4";
-        if (auto item = m_versions.SelectedItem())
-            version = unbox_value<hstring>(item);
-        RunOfflineLaunchAsync(username, version);
-    }
-
-    void MainWindow::OnUpdateClicked()
-    {
-        Update::OpenUrl(m_updateUrl);
     }
 
     fire_and_forget MainWindow::CheckForUpdates()
     {
-        AppendLog(L"Checking for launcher updates...");
         JsonObject release = co_await Update::GetLatestReleaseAsync();
         if (!release)
-        {
-            AppendLog(L"No releases found or offline \u2014 running dev build.");
             co_return;
-        }
         hstring latest = release.GetNamedString(L"tag_name", L"");
         hstring current = Update::CurrentVersionTag();
         if (!latest.empty() && Update::IsNewerTag(current, latest))
         {
             m_updateUrl = Update::DownloadUrlFor(release);
-            m_updateText.Text(L"Update available: " + current + L" \u2192 " + latest);
-            m_updateBanner.Visibility(Visibility::Visible);
-            AppendLog(L"Update available: " + latest);
+            m_updateText.Text(L"Update available: " + current + L" → " + latest);
+            m_banner.Visibility(Visibility::Visible);
         }
-        else
-        {
-            AppendLog(L"Launcher is up to date (" + current + L").");
-        }
-    }
-
-    fire_and_forget MainWindow::RunOfflineLaunchAsync(hstring username, hstring version)
-    {
-        m_play.IsEnabled(false);
-        m_progress.Visibility(Visibility::Visible);
-        AppendLog(L"Launching " + version + L" as " + username + L" (offline)...");
-        AppendLog(L"Resolving version manifest...");
-        co_await resume_after(600ms);
-        AppendLog(L"Game download + Java launch land in the next iteration.");
-        co_await resume_after(400ms);
-        AppendLog(L"Stub complete \u2014 UI shell v1 works.");
-        m_progress.Visibility(Visibility::Collapsed);
-        m_play.IsEnabled(true);
-    }
-
-    void MainWindow::AppendLog(hstring const& line)
-    {
-        m_log.Text(m_log.Text() + line + L"\r\n");
     }
 }

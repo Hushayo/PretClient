@@ -1,9 +1,8 @@
-// Unpackaged entry point: bootstrap the Windows App SDK runtime,
-// then start the WinUI application.
+// Unpackaged entry point. The Windows App SDK bootstrapper runs automatically
+// via the auto-initializer objects linked from the NuGet packages, so all
+// that remains here is apartment init + Application::Start.
 #include "pch.h"
 #include "App.h"
-#include <MddBootstrap.h>
-#include <WindowsAppSDK-VersionInfo.h>
 
 int __stdcall wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
 {
@@ -11,23 +10,8 @@ int __stdcall wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
 
     winrt::init_apartment(winrt::apartment_type::single_threaded);
 
-    const HRESULT bootstrapHr = ::MddBootstrapInitialize(
-        WINDOWSAPPSDK_RELEASE_MAJORMINOR,
-        WINDOWSAPPSDK_RELEASE_VERSION_TAG_W,
-        { WINDOWSAPPSDK_RUNTIME_VERSION_UINT64 });
-    if (FAILED(bootstrapHr))
-    {
-        MessageBoxW(
-            nullptr,
-            L"Failed to initialize the Windows App SDK runtime.\nReinstall PretClient and try again.",
-            L"PretClient",
-            MB_OK | MB_ICONERROR);
-        return 0;
-    }
-
     ::winrt::Microsoft::UI::Xaml::Application::Start(
         [](auto&&) { ::winrt::make<::winrt::PretClient::App>(); });
 
-    ::MddBootstrapShutdown();
     return 0;
 }

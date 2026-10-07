@@ -1,0 +1,28 @@
+#pragma once
+
+#include <map>
+#include "Downloader.h"
+
+// Offline launch: offline UUID, full java command from the prepared game
+// (modern `arguments` and legacy `minecraftArguments`), plus process
+// tracking for play / stop / restart.
+namespace winrt::PretClient::Launcher
+{
+    struct Command
+    {
+        hstring exe{};
+        hstring args{};
+        hstring workDir{};
+    };
+
+    hstring OfflineUuid(hstring username);
+    Command BuildCommand(Downloader::PreparedGame const& game, hstring username, hstring uuid,
+        int minMemMb, int maxMemMb, hstring javaExe);
+
+    // Process sessions, keyed by instance id.
+    bool Start(Command const& cmd, hstring const& instanceId, hstring& error);
+    void Stop(hstring const& instanceId);
+    bool IsRunning(hstring const& instanceId);
+    void* RawHandle(hstring const& instanceId);
+    unsigned long Pid(hstring const& instanceId);
+}

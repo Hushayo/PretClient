@@ -122,7 +122,7 @@
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>windowsapp.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>windowsapp.lib;Psapi.lib;Pdh.lib;Bcrypt.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -136,7 +136,7 @@
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>windowsapp.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>windowsapp.lib;Psapi.lib;Pdh.lib;Bcrypt.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x86'">
@@ -150,7 +150,7 @@
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>windowsapp.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>windowsapp.lib;Psapi.lib;Pdh.lib;Bcrypt.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x86'">
@@ -164,7 +164,7 @@
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>windowsapp.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>windowsapp.lib;Psapi.lib;Pdh.lib;Bcrypt.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">
@@ -178,7 +178,7 @@
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>windowsapp.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>windowsapp.lib;Psapi.lib;Pdh.lib;Bcrypt.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">
@@ -192,19 +192,47 @@
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>windowsapp.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>windowsapp.lib;Psapi.lib;Pdh.lib;Bcrypt.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="App.h" />
     <ClInclude Include="MainWindow.h" />
+    <ClInclude Include="Paths.h" />
+    <ClInclude Include="Settings.h" />
     <ClInclude Include="pch.h" />
+    <ClInclude Include="Minecraft\Downloader.h" />
+    <ClInclude Include="Minecraft\Fabric.h" />
+    <ClInclude Include="Minecraft\Http.h" />
+    <ClInclude Include="Minecraft\Instance.h" />
+    <ClInclude Include="Minecraft\Java.h" />
+    <ClInclude Include="Minecraft\Launcher.h" />
+    <ClInclude Include="Minecraft\Modrinth.h" />
+    <ClInclude Include="Minecraft\Rules.h" />
+    <ClInclude Include="Minecraft\Versions.h" />
+    <ClInclude Include="System\Stats.h" />
+    <ClInclude Include="UI\InstancesPage.h" />
+    <ClInclude Include="UI\ModsPage.h" />
+    <ClInclude Include="UI\SettingsPage.h" />
+    <ClInclude Include="UI\Theme.h" />
     <ClInclude Include="Update\Updater.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="App.cpp" />
     <ClCompile Include="MainWindow.cpp" />
+    <ClCompile Include="Settings.cpp" />
     <ClCompile Include="main.cpp" />
+    <ClCompile Include="Minecraft\Downloader.cpp" />
+    <ClCompile Include="Minecraft\Fabric.cpp" />
+    <ClCompile Include="Minecraft\Instance.cpp" />
+    <ClCompile Include="Minecraft\Java.cpp" />
+    <ClCompile Include="Minecraft\Launcher.cpp" />
+    <ClCompile Include="Minecraft\Modrinth.cpp" />
+    <ClCompile Include="Minecraft\Versions.cpp" />
+    <ClCompile Include="System\Stats.cpp" />
+    <ClCompile Include="UI\InstancesPage.cpp" />
+    <ClCompile Include="UI\ModsPage.cpp" />
+    <ClCompile Include="UI\SettingsPage.cpp" />
     <ClCompile Include="Update\Updater.cpp" />
     <ClCompile Include="pch.cpp">
       <PrecompiledHeader>Create</PrecompiledHeader>
