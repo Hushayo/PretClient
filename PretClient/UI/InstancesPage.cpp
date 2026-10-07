@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "InstancesPage.h"
 #include "Theme.h"
+#include "../Minecraft/Auth.h"
 #include "../Minecraft/Downloader.h"
 #include "../Minecraft/Fabric.h"
 #include "../Minecraft/Forge.h"
@@ -9,6 +10,7 @@
 #include "../Minecraft/NeoForge.h"
 #include "../Minecraft/Quilt.h"
 #include <algorithm>
+#include <commdlg.h>
 #include <fstream>
 #include <shellapi.h>
 #include "../Minecraft/Java.h"
@@ -514,6 +516,11 @@ namespace winrt::PretClient
                 modsBtn.Click([this, id](IInspectable const&, RoutedEventArgs const&) { ModsDialog(id); });
                 buttons.Children().Append(modsBtn);
             }
+
+            Button packsBtn{};
+            packsBtn.Content(box_value(L"Resource Packs"));
+            packsBtn.Click([this, id](IInspectable const&, RoutedEventArgs const&) { ResourcePacksDialog(id); });
+            buttons.Children().Append(packsBtn);
 
             Button del{};
             del.Content(box_value(L"Delete"));
@@ -1055,6 +1062,121 @@ namespace winrt::PretClient
         }
     }
 
+    namespace
+    {
+        std::wstring LowerW(std::wstring s)
+        {
+            for (auto& c : s)
+                c = static_cast<wchar_t>(towlower(c));
+            return s;
+        }
+
+        bool EndsWith(std::wstring const& s, std::wstring const& suffix)
+        {
+            if (suffix.size() > s.size())
+                return false;
+            return s.compare(s.size() - suffix.size(), suffix.size(), suffix) == 0;
+        }
+
+        // Enabled pack entries: *.zip files and unpacked pack folders.
+        // Anything ending in .disabled is treated as switched off.
+        bool IsPackFileName(std::wstring const& extLower)
+        {
+            return extLower == L".zip";
+        }
+
+        bool IsEnabledPackEntry(std::filesystem::directory_entry const& e)
+        {
+            std::error_code ec;
+            auto name = LowerW(e.path().filename().wstring());
+            if (EndsWith(name, L".disabled"))
+                return false;
+            if (e.is_regular_file(ec))
+                return IsPackFileName(LowerW(e.path().extension().wstring()));
+            if (e.is_directory(ec))
+                return true;
+            return false;
+        }
+    } // namespace
+
+    void InstancesPage::StageResourcePacks(std::filesystem::path const& instancePacks,
+        std::filesystem::path const& gamePacks)
+    {
+        // The game only reads <gameDir>/resourcepacks, but game files are
+        // shared by all instances, so the instance's own folder is staged in
+        // right before launch. *.disabled entries are left behind (off).
+        try
+        {
+            std::error_code ec;
+            std::filesystem::create_directories(instancePacks, ec);
+            std::filesystem::create_directories(gamePacks, ec);
+
+            // First time this instance gets its own folder: adopt the packs
+            // from the old shared layout so nothing silently disappears.
+            bool emptyInstance = true;
+            for (auto const& e : std::filesystem::directory_iterator(instancePacks, ec))
+            {
+                (void)e;
+                emptyInstance = false;
+                break;
+            }
+            if (emptyInstance)
+            {
+                for (auto const& e : std::filesystem::directory_iterator(gamePacks, ec))
+                {
+                    if (!IsEnabledPackEntry(e))
+                        continue;
+                    std::error_code ec2;
+                    if (e.is_regular_file(ec2))
+                        std::filesystem::copy_file(e.path(), instancePacks / e.path().filename(),
+                            std::filesystem::copy_options::overwrite_existing, ec2);
+                    else if (e.is_directory(ec2))
+                        std::filesystem::copy(e.path(), instancePacks / e.path().filename(),
+                            std::filesystem::copy_options::recursive |
+                            std::filesystem::copy_options::overwrite_existing, ec2);
+                }
+            }
+
+            // Collect first: erasing entries while a directory_iterator is
+            // mid-walk can truncate the walk on Windows.
+            std::vector<std::filesystem::path> shared;
+            for (auto const& e : std::filesystem::directory_iterator(gamePacks, ec))
+            {
+                if (!IsEnabledPackEntry(e))
+                    continue;
+                shared.push_back(e.path());
+            }
+            for (auto const& p : shared)
+            {
+                std::error_code ec2;
+                if (std::filesystem::is_directory(p, ec2))
+                    std::filesystem::remove_all(p, ec2);
+                else
+                    std::filesystem::remove(p, ec2);
+            }
+            for (auto const& e : std::filesystem::directory_iterator(instancePacks, ec))
+            {
+                if (!IsEnabledPackEntry(e))
+                    continue;
+                std::error_code ec2;
+                if (e.is_regular_file(ec2))
+                    std::filesystem::copy_file(e.path(), gamePacks / e.path().filename(),
+                        std::filesystem::copy_options::overwrite_existing, ec2);
+                else if (e.is_directory(ec2))
+                {
+                    auto dest = gamePacks / e.path().filename();
+                    std::filesystem::remove_all(dest, ec2);
+                    std::filesystem::copy(e.path(), dest,
+                        std::filesystem::copy_options::recursive |
+                        std::filesystem::copy_options::overwrite_existing, ec2);
+                }
+            }
+        }
+        catch (...)
+        {
+        }
+    }
+
     fire_and_forget InstancesPage::ModsDialog(hstring id)
     {
         auto settings = LoadSettings();
@@ -1352,6 +1474,270 @@ namespace winrt::PretClient
         co_await dialog.ShowAsync();
     }
 
+    fire_and_forget InstancesPage::ResourcePacksDialog(hstring id)
+    {
+        auto settings = LoadSettings();
+        auto packsDir = InstanceResourcePacksDir(settings, id);
+        std::error_code ec;
+        std::filesystem::create_directories(packsDir, ec);
+
+        hstring instName;
+        for (auto const& i : LoadInstances())
+        {
+            if (i.id == id)
+            {
+                instName = i.name;
+                break;
+            }
+        }
+        if (instName.empty())
+        {
+            SetStatus(L"Instance is gone.");
+            co_return;
+        }
+
+        StackPanel panel{};
+        panel.Spacing(8);
+
+        TextBlock hint{};
+        hint.Style(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>());
+        hint.Opacity(0.6);
+        hint.TextWrapping(TextWrapping::Wrap);
+        hint.Text(L"Packs are stored per instance and staged into the shared resourcepacks "
+            L"folder on Play. Turn them on in-game via Options > Resource Packs.");
+        panel.Children().Append(hint);
+
+        TextBlock dirText{};
+        dirText.Style(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>());
+        dirText.Opacity(0.5);
+        dirText.TextWrapping(TextWrapping::Wrap);
+        panel.Children().Append(dirText);
+
+        StackPanel tools{};
+        tools.Orientation(Orientation::Horizontal);
+        tools.Spacing(8);
+        panel.Children().Append(tools);
+
+        StackPanel list{};
+        list.Spacing(6);
+        ScrollViewer scroll{};
+        scroll.MaxHeight(380);
+        scroll.VerticalScrollBarVisibility(ScrollBarVisibility::Auto);
+        scroll.HorizontalScrollBarVisibility(ScrollBarVisibility::Disabled);
+        scroll.Content(list);
+        panel.Children().Append(scroll);
+
+        TextBlock status{};
+        status.Style(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>());
+        status.Opacity(0.7);
+        status.TextWrapping(TextWrapping::Wrap);
+        panel.Children().Append(status);
+
+        auto rebuild = std::make_shared<std::function<void()>>();
+        *rebuild = [list, dirText, packsDir, status,
+            weak = std::weak_ptr<std::function<void()>>(rebuild)]() {
+            try
+            {
+                list.Children().Clear();
+                std::error_code e;
+                std::vector<std::filesystem::path> entries;
+                if (std::filesystem::exists(packsDir, e))
+                {
+                    for (auto const& en : std::filesystem::directory_iterator(packsDir, e))
+                    {
+                        auto lname = LowerW(en.path().filename().wstring());
+                        if (en.is_regular_file(e))
+                        {
+                            if (lname.size() >= 4 &&
+                                (EndsWith(lname, L".zip") || EndsWith(lname, L".zip.disabled")))
+                                entries.push_back(en.path());
+                        }
+                        else if (en.is_directory(e))
+                            entries.push_back(en.path());
+                    }
+                }
+                std::sort(entries.begin(), entries.end());
+
+                int count = 0;
+                for (auto const& p : entries)
+                {
+                    std::error_code e2;
+                    bool isDir = std::filesystem::is_directory(p, e2);
+                    auto lname = LowerW(p.filename().wstring());
+                    bool enabled = !EndsWith(lname, L".disabled");
+
+                    Grid row{};
+                    row.ColumnSpacing(8);
+                    auto colName = ColumnDefinition{};
+                    colName.Width(GridLengthHelper::FromValueAndType(1.0, GridUnitType::Star));
+                    auto colInfo = ColumnDefinition{};
+                    colInfo.Width(GridLengthHelper::FromValueAndType(130, GridUnitType::Pixel));
+                    auto colActions = ColumnDefinition{};
+                    colActions.Width(GridLengthHelper::Auto());
+                    row.ColumnDefinitions().Append(colName);
+                    row.ColumnDefinitions().Append(colInfo);
+                    row.ColumnDefinitions().Append(colActions);
+
+                    TextBlock t{};
+                    t.Text(hstring{ p.filename().wstring() });
+                    t.FontWeight(Windows::UI::Text::FontWeights::SemiBold());
+                    t.VerticalAlignment(VerticalAlignment::Center);
+                    t.TextTrimming(TextTrimming::CharacterEllipsis);
+                    ToolTipService::SetToolTip(t, box_value(hstring{ p.wstring() }));
+                    Grid::SetColumn(t, 0);
+                    row.Children().Append(t);
+
+                    TextBlock info{};
+                    info.Style(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>());
+                    info.Opacity(0.7);
+                    info.VerticalAlignment(VerticalAlignment::Center);
+                    info.TextTrimming(TextTrimming::CharacterEllipsis);
+                    if (isDir)
+                        info.Text(enabled ? L"folder" : L"folder (off)");
+                    else
+                    {
+                        auto bytes = std::filesystem::file_size(p, e2);
+                        hstring size = e2 ? hstring{ L"?" } : FormatBytes(static_cast<unsigned long long>(bytes));
+                        info.Text(enabled ? size : hstring{ size + L" (off)" });
+                    }
+                    Grid::SetColumn(info, 1);
+                    row.Children().Append(info);
+
+                    StackPanel actions{};
+                    actions.Orientation(Orientation::Horizontal);
+                    actions.Spacing(6);
+                    actions.VerticalAlignment(VerticalAlignment::Center);
+                    Grid::SetColumn(actions, 2);
+                    row.Children().Append(actions);
+
+                    Button toggle{};
+                    toggle.Content(box_value(enabled ? L"Disable" : L"Enable"));
+                    toggle.Click([weak, p, enabled, status](IInspectable const&, RoutedEventArgs const&) {
+                        std::error_code e3;
+                        if (enabled)
+                        {
+                            std::filesystem::rename(p,
+                                std::filesystem::path{ p.wstring() + L".disabled" }, e3);
+                        }
+                        else
+                        {
+                            std::wstring w{ p.wstring() };
+                            if (w.size() > 9 && EndsWith(LowerW(w), L".disabled"))
+                                w = w.substr(0, w.size() - 9);
+                            std::filesystem::rename(p, std::filesystem::path{ w }, e3);
+                        }
+                        if (e3 && status)
+                            status.Text(L"Could not toggle that pack.");
+                        if (auto r = weak.lock())
+                            if (*r)
+                                (*r)();
+                    });
+                    actions.Children().Append(toggle);
+
+                    Button rm{};
+                    rm.Content(box_value(L"Remove"));
+                    rm.Click([weak, p, status](IInspectable const&, RoutedEventArgs const&) {
+                        std::error_code e3;
+                        bool isDir2 = std::filesystem::is_directory(p, e3);
+                        if (isDir2)
+                            std::filesystem::remove_all(p, e3);
+                        else
+                            std::filesystem::remove(p, e3);
+                        if (status)
+                        {
+                            if (e3)
+                                status.Text(L"Could not remove that pack.");
+                            else
+                                status.Text(hstring{ L"Removed " } + hstring{ p.filename().wstring() });
+                        }
+                        if (auto r = weak.lock())
+                            if (*r)
+                                (*r)();
+                    });
+                    actions.Children().Append(rm);
+
+                    list.Children().Append(row);
+                    ++count;
+                }
+
+                wchar_t dbuf[512]{};
+                swprintf_s(dbuf, L"Folder: %s  (%d pack(s))",
+                    std::wstring{ packsDir.wstring() }.c_str(), count);
+                dirText.Text(dbuf);
+                if (count == 0)
+                {
+                    TextBlock empty{};
+                    empty.Text(L"No resource packs yet. Click Add .zip... or drop files into the folder.");
+                    empty.Opacity(0.6);
+                    empty.Style(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>());
+                    empty.TextWrapping(TextWrapping::Wrap);
+                    list.Children().Append(empty);
+                }
+            }
+            catch (...)
+            {
+            }
+        };
+        (*rebuild)();
+
+        Button addBtn{};
+        addBtn.Content(box_value(L"Add .zip..."));
+        addBtn.Click([packsDir, status, rebuild](IInspectable const&, RoutedEventArgs const&) {
+            wchar_t fileBuf[32768]{};
+            OPENFILENAMEW ofn{};
+            ofn.lStructSize = sizeof(ofn);
+            ofn.lpstrFile = fileBuf;
+            ofn.nMaxFile = ARRAYSIZE(fileBuf);
+            ofn.lpstrFilter = L"Resource packs (*.zip)\0*.zip\0All files (*.*)\0*.*\0";
+            ofn.nFilterIndex = 1;
+            ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
+            ofn.lpstrTitle = L"Add resource pack (.zip)";
+            if (!GetOpenFileNameW(&ofn))
+                return; // cancelled
+            try
+            {
+                std::filesystem::path src{ fileBuf };
+                std::error_code ec2;
+                std::filesystem::create_directories(packsDir, ec2);
+                std::filesystem::copy_file(src, packsDir / src.filename(),
+                    std::filesystem::copy_options::overwrite_existing, ec2);
+                if (ec2)
+                {
+                    if (status)
+                        status.Text(L"Could not add that file.");
+                    return;
+                }
+                if (status)
+                    status.Text(hstring{ L"Added " } + hstring{ src.filename().wstring() });
+                if (rebuild && *rebuild)
+                    (*rebuild)();
+            }
+            catch (...)
+            {
+                if (status)
+                    status.Text(L"Could not add that file.");
+            }
+        });
+        tools.Children().Append(addBtn);
+
+        Button openBtn{};
+        openBtn.Content(box_value(L"Open folder"));
+        openBtn.Click([packsDir](IInspectable const&, RoutedEventArgs const&) {
+            std::error_code e;
+            std::filesystem::create_directories(packsDir, e);
+            ShellExecuteW(nullptr, L"open", packsDir.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+        });
+        tools.Children().Append(openBtn);
+
+        ContentDialog dialog{};
+        dialog.Title(box_value(hstring{ L"Resource Packs - " } + instName));
+        dialog.Content(panel);
+        dialog.CloseButtonText(L"Close");
+        dialog.MinWidth(620);
+        dialog.XamlRoot(m_root.XamlRoot());
+        co_await dialog.ShowAsync();
+    }
+
     hstring InstancesPage::TailText(std::filesystem::path const& file)
     {
         try
@@ -1552,6 +1938,8 @@ namespace winrt::PretClient
         std::wstring gameDir{ EffectiveGameDir(settings) };
         auto instanceMods = InstanceModsDir(settings, id);
         auto gameMods = std::filesystem::path{ gameDir } / L"mods";
+        auto instancePacks = InstanceResourcePacksDir(settings, id);
+        auto gamePacks = std::filesystem::path{ gameDir } / L"resourcepacks";
         bool isModded = (inst.loader != L"vanilla");
         hstring username = settings.username.empty() ? hstring{ L"Steve" } : settings.username;
         hstring javaPath = settings.javaPath;
@@ -1632,7 +2020,8 @@ namespace winrt::PretClient
             isModded ? std::wstring{ instanceMods.wstring() } : std::wstring{},
             javaPath,
             logCb, progCb,
-            [this, id, username, javaPath, minMem, maxMem, fail, isModded, instanceMods, gameMods](
+            [this, id, username, javaPath, minMem, maxMem, fail, isModded, instanceMods, gameMods,
+                instancePacks, gamePacks](
                 bool ok, Downloader::PreparedGame game, hstring error) {
                 if (!ok)
                 {
@@ -1640,13 +2029,15 @@ namespace winrt::PretClient
                     return;
                 }
                 FinishLaunch(id, username, javaPath, minMem, maxMem,
-                    std::move(game), isModded, instanceMods, gameMods);
+                    std::move(game), isModded, instanceMods, gameMods,
+                    instancePacks, gamePacks);
             });
     }
 
     fire_and_forget InstancesPage::FinishLaunch(hstring id, hstring username, hstring javaPath,
         int minMem, int maxMem, Downloader::PreparedGame game, bool isModded,
-        std::filesystem::path instanceMods, std::filesystem::path gameMods)
+        std::filesystem::path instanceMods, std::filesystem::path gameMods,
+        std::filesystem::path instancePacks, std::filesystem::path gamePacks)
     {
         auto failed = [this, id](hstring const& msg) {
             SetStatus(msg);
@@ -1664,6 +2055,9 @@ namespace winrt::PretClient
         // java -version probes with long waits) and now runs off the UI.
         if (isModded)
             StageMods(instanceMods, gameMods);
+        // Resource packs work on every loader (incl. vanilla): the game only
+        // reads the shared folder, so the instance's packs stage in here.
+        StageResourcePacks(instancePacks, gamePacks);
         hstring javaExe = javaPath;
         if (!javaExe.empty())
         {
@@ -1696,8 +2090,20 @@ namespace winrt::PretClient
             failed(buf);
             co_return;
         }
-        auto uuid = Launcher::OfflineUuid(username);
-        auto cmd = Launcher::BuildCommand(game, username, uuid, minMem, maxMem, javaExe);
+        // Microsoft session when linked (silent refresh), otherwise the
+        // classic offline session. Never half-launch on a stale token.
+        if (Auth::HasMicrosoft())
+        {
+            SetStatus(L"Checking Microsoft session...");
+            if (!co_await Auth::EnsureSessionAsync())
+            {
+                failed(L"Microsoft session expired. Sign in again in Settings.");
+                co_return;
+            }
+        }
+        auto sess = Auth::LaunchSession();
+        auto cmd = Launcher::BuildCommand(game, sess.username, sess.uuid,
+            sess.token, sess.userType, sess.xuid, minMem, maxMem, javaExe);
         hstring err;
         if (Launcher::Start(cmd, id, err))
             SetStatus(hstring{ L"Running (pid " } + to_hstring(static_cast<std::uint32_t>(Launcher::Pid(id))) +

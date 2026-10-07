@@ -140,4 +140,9 @@ namespace winrt::PretClient
     {
         return InstanceDir(s, instanceId) / L"mods";
     }
+
+    std::filesystem::path InstanceResourcePacksDir(Settings const& s, hstring const& instanceId)
+    {
+        return InstanceDir(s, instanceId) / L"resourcepacks";
+    }
 }

@@ -128,6 +128,7 @@ namespace winrt::PretClient::Launcher
     }
 
     Command BuildCommand(Downloader::PreparedGame const& game, hstring username, hstring uuid,
+        hstring accessToken, hstring userType, hstring xuid,
         int minMemMb, int maxMemMb, hstring javaExe)
     {
         Command cmd{};
@@ -226,10 +227,10 @@ namespace winrt::PretClient::Launcher
             { L"game_assets", hstring{ assets } },
             { L"assets_index_name", assetIndex },
             { L"auth_uuid", uuid },
-            { L"auth_access_token", L"0" },
+            { L"auth_access_token", accessToken.empty() ? hstring{ L"0" } : accessToken },
             { L"clientid", L"" },
-            { L"auth_xuid", L"" },
-            { L"user_type", L"legacy" },
+            { L"auth_xuid", xuid },
+            { L"user_type", userType.empty() ? hstring{ L"legacy" } : userType },
             { L"version_type", versionType },
             { L"natives_directory", hstring{ natives } },
             { L"launcher_name", L"PretClient" },

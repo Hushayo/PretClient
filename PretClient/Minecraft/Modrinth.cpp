@@ -163,15 +163,19 @@ namespace winrt::PretClient::Modrinth
         }
     } // namespace
 
-    fire_and_forget SearchAsync(hstring query, hstring mcVersion, hstring loader, int offset, SearchFn done)
+    fire_and_forget SearchAsync(hstring query, hstring mcVersion, hstring loader, int offset, SearchFn done,
+        hstring projectType)
     {
         SearchResult out{};
         try
         {
-            std::wstring facets = L"[[\"project_type:mod\"]";
+            std::wstring pt{ projectType.empty() ? L"mod" : std::wstring{ projectType } };
+            std::wstring facets = L"[[\"project_type:" + pt + L"\"]";
             if (!mcVersion.empty())
                 facets += L",[\"versions:" + std::wstring{ mcVersion } + L"\"]";
-            if (!loader.empty() && loader != L"all")
+            // Loader categories only make sense for mods; plugin loaders
+            // differ (paper/spigot/...) and are matched at install time.
+            if (pt == L"mod" && !loader.empty() && loader != L"all")
                 facets += L",[\"categories:" + std::wstring{ loader } + L"\"]";
             facets += L"]";
             hstring url = hstring{ kApi } + L"/search?query=" + Http::Escape(query) +

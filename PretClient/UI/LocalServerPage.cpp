@@ -3,16 +3,23 @@
 #include "Theme.h"
 #include "../Minecraft/Http.h"
 #include "../Minecraft/Java.h"
+#include "../Minecraft/Modrinth.h"
 #include "../Minecraft/Server.h"
 #include "../Paths.h"
+#include "../Settings.h"
+#include <algorithm>
 #include <chrono>
 #include <coroutine>
 #include <shellapi.h>
+#include <thread>
+#include <winrt/Microsoft.UI.Xaml.Input.h>
+#include <winrt/Windows.System.h>
 #include <winrt/Windows.UI.Text.h>
 
 using namespace winrt;
 using namespace Microsoft::UI::Xaml;
 using namespace Microsoft::UI::Xaml::Controls;
+using namespace Microsoft::UI::Xaml::Input;
 using namespace Microsoft::UI::Xaml::Shapes;
 using namespace Windows::Foundation;
 
@@ -67,6 +74,35 @@ namespace winrt::PretClient
             return hstring{ buf };
         }
 
+        hstring FmtSize(unsigned long long bytes)
+        {
+            wchar_t buf[32]{};
+            if (bytes >= 1073741824ULL)
+                swprintf_s(buf, L"%.1f GB", bytes / 1073741824.0);
+            else if (bytes >= 1048576ULL)
+                swprintf_s(buf, L"%.1f MB", bytes / 1048576.0);
+            else if (bytes >= 1024ULL)
+                swprintf_s(buf, L"%llu KB", bytes / 1024ULL);
+            else
+                swprintf_s(buf, L"%llu B", bytes);
+            return hstring{ buf };
+        }
+
+        // Modrinth loader for the server's mod tab, "" when N/A.
+        hstring ModLoaderFor(hstring const& software)
+        {
+            std::wstring s{ software };
+            if (s == L"fabric" || s == L"quilt" || s == L"forge" || s == L"neoforge")
+                return software;
+            return hstring{};
+        }
+
+        bool PluginsFor(hstring const& software)
+        {
+            std::wstring s{ software };
+            return s == L"paper" || s == L"folia" || s == L"purpur" || s == L"leaves" || s == L"spigot";
+        }
+
         void WriteRunBat(std::filesystem::path const& dir, std::wstring const& jar)
         {
             try
@@ -77,6 +113,29 @@ namespace winrt::PretClient
                      "REM PretClient server - set eula=true in eula.txt first, then run.\r\n"
                      "java -Xmx2048M -jar \"" +
                         narrow + "\" nogui\r\npause\r\n";
+            }
+            catch (...)
+            {
+            }
+        }
+
+        // Step log for the server install flow (flushed per line): if the app
+        // dies mid-install, the tail of server-debug.log shows exactly where.
+        void DbgLog(std::string const& line)
+        {
+            try
+            {
+                std::ofstream f(Paths::DataDir() / L"server-debug.log",
+                    std::ios::binary | std::ios::app);
+                SYSTEMTIME st{};
+                GetLocalTime(&st);
+                auto two = [](unsigned n) {
+                    std::string s = std::to_string(n);
+                    return (s.size() < 2 ? "0" : "") + s;
+                };
+                f << "[" + two(st.wHour) + ":" + two(st.wMinute) + ":" + two(st.wSecond) + "] " +
+                        line + "\r\n";
+                f.flush();
             }
             catch (...)
             {
@@ -119,6 +178,30 @@ namespace winrt::PretClient
 
         m_servers.Spacing(8);
         m_root.Children().Append(m_servers);
+
+        m_detail.Spacing(12);
+        m_detail.Visibility(Visibility::Collapsed);
+        m_root.Children().Append(m_detail);
+
+        // Pump server output into the backlog + live detail view.
+        Server::SetConsoleSink(
+            [this](hstring id, std::string line, bool exited, int code) {
+                try
+                {
+                    m_ui.TryEnqueue([this, id, line, exited, code] {
+                        try
+                        {
+                            AppendConsole(id, line, exited, code);
+                        }
+                        catch (...)
+                        {
+                        }
+                    });
+                }
+                catch (...)
+                {
+                }
+            });
 
         RefreshServers();
     }
@@ -163,6 +246,8 @@ namespace winrt::PretClient
         try
         {
             m_servers.Children().Clear();
+            if (m_detail.Visibility() == Visibility::Visible)
+                return; // detail view owns the page right now
             auto all = Server::AllSoftware();
             for (auto const& s : Server::LoadServers())
             {
@@ -176,42 +261,63 @@ namespace winrt::PretClient
                     }
                 }
                 auto dir = Server::ServersDir() / std::wstring{ s.id };
+                bool running = Server::ConsoleRunning(s.id);
+                hstring shown = s.name.empty() ? s.id : s.name;
 
-                StackPanel row{};
-                row.Orientation(Orientation::Horizontal);
-                row.Spacing(8);
-                row.VerticalAlignment(VerticalAlignment::Center);
+                Border card{};
+                card.Background(Theme::CardBrush());
+                card.BorderBrush(Theme::CardStroke());
+                card.BorderThickness(ThicknessHelper::FromUniformLength(1));
+                card.CornerRadius(CornerRadiusHelper::FromUniformRadius(12));
+                card.Padding(ThicknessHelper::FromUniformLength(16));
 
+                StackPanel col{};
+                col.Spacing(8);
+
+                StackPanel head{};
+                head.Orientation(Orientation::Horizontal);
+                head.Spacing(12);
+                head.VerticalAlignment(VerticalAlignment::Center);
                 TextBlock name{};
-                name.Text(s.name + L"  -  " + label + L" " + s.mcVersion);
+                name.Text(shown + L"  -  " + label + L" " + s.mcVersion);
+                name.FontWeight(Windows::UI::Text::FontWeights::SemiBold());
                 name.VerticalAlignment(VerticalAlignment::Center);
-                name.Width(320);
-                name.TextTrimming(TextTrimming::CharacterEllipsis);
-                row.Children().Append(name);
+                head.Children().Append(name);
+                TextBlock state{};
+                state.Text(running ? L"Running" : L"Stopped");
+                state.Opacity(0.7);
+                state.VerticalAlignment(VerticalAlignment::Center);
+                head.Children().Append(state);
+                col.Children().Append(head);
 
-                Button run{};
-                run.Content(box_value(L"Run"));
-                run.Click([this, dir](IInspectable const&, RoutedEventArgs const&) {
-                    try
-                    {
-                        auto bat = dir / L"run.bat";
-                        std::error_code ec;
-                        if (std::filesystem::exists(bat, ec))
-                        {
-                            ShellExecuteW(nullptr, L"open", bat.wstring().c_str(),
-                                nullptr, dir.wstring().c_str(), SW_SHOWNORMAL);
-                        }
-                        else
-                        {
-                            SetStatus(L"No run script yet in " + hstring{ dir.wstring() } +
-                                L" - finish the install first.");
-                        }
-                    }
-                    catch (...)
-                    {
-                    }
+                StackPanel btns{};
+                btns.Orientation(Orientation::Horizontal);
+                btns.Spacing(8);
+
+                Button manage{};
+                manage.Content(box_value(L"Manage"));
+                manage.Click([this, id = s.id](IInspectable const&, RoutedEventArgs const&) {
+                    OpenDetail(id);
                 });
-                row.Children().Append(run);
+                btns.Children().Append(manage);
+
+                Button start{};
+                start.Content(box_value(L"Start"));
+                start.IsEnabled(!running);
+                start.Click([this, id = s.id](IInspectable const&, RoutedEventArgs const&) {
+                    StartServer(id);
+                });
+                btns.Children().Append(start);
+
+                Button stop{};
+                stop.Content(box_value(L"Stop"));
+                stop.IsEnabled(running);
+                stop.Click([this, id = s.id](IInspectable const&, RoutedEventArgs const&) {
+                    Server::StopConsole(id);
+                    SetStatus(L"Stopping...");
+                    RefreshServers();
+                });
+                btns.Children().Append(stop);
 
                 Button folder{};
                 folder.Content(box_value(L"Folder"));
@@ -225,9 +331,11 @@ namespace winrt::PretClient
                     {
                     }
                 });
-                row.Children().Append(folder);
+                btns.Children().Append(folder);
+                col.Children().Append(btns);
 
-                m_servers.Children().Append(row);
+                card.Child(col);
+                m_servers.Children().Append(card);
             }
         }
         catch (...)
@@ -419,6 +527,7 @@ namespace winrt::PretClient
             }
         }
         SetStatus(L"Resolving " + label + L" " + mc + L"...");
+        DbgLog("install start sw=" + to_string(software) + " mc=" + to_string(mc));
         Server::ResolveArtifactAsync(software, mc,
             [this, name, software, mc](Server::Artifact art, hstring err) -> fire_and_forget {
                 try
@@ -431,6 +540,8 @@ namespace winrt::PretClient
                     }
                     auto dir = Server::ServersDir() / std::wstring{ Server::NewServerId() };
                     auto dest = dir / std::wstring{ art.fileName };
+                    DbgLog("resolved kind=" + std::to_string(static_cast<int>(art.kind)) +
+                        " dest=" + to_string(dest.wstring()));
                     SetStatus(L"Downloading " + hstring{ art.fileName } + L"...");
                     m_progress.IsIndeterminate(true);
                     hstring dlErr = co_await Http::DownloadToFileAsync(art.url, dest, kUA,
@@ -455,10 +566,12 @@ namespace winrt::PretClient
                         });
                     if (!dlErr.empty())
                     {
+                        DbgLog("download error: " + to_string(dlErr));
                         SetStatus(L"Download failed: " + dlErr);
                         WorkDone();
                         co_return;
                     }
+                    DbgLog("download done");
                     // Size + hash checks against the published metadata.
                     if (art.size > 0)
                     {
@@ -474,6 +587,7 @@ namespace winrt::PretClient
                     }
                     if (!art.sha256.empty() || !art.sha1.empty())
                         SetStatus(L"Checking hash...");
+                    DbgLog("verifying size/hash");
                     if (!art.sha256.empty())
                     {
                         std::wstring hex;
@@ -536,6 +650,7 @@ namespace winrt::PretClient
                     {
                         WriteRunBat(dir, std::wstring{ art.fileName });
                     }
+                    DbgLog("files written");
 
                     auto all = Server::LoadServers();
                     Server::ServerEntry entry{};
@@ -545,7 +660,9 @@ namespace winrt::PretClient
                     entry.mcVersion = mc;
                     all.push_back(std::move(entry));
                     Server::SaveServers(all);
+                    DbgLog("record saved");
                     RefreshServers();
+                    DbgLog("list refreshed");
                     SetStatus(L"Server created in " + hstring{ dir.wstring() } +
                         L". Set eula=true in eula.txt, then press Run.");
                     WorkDone();
@@ -554,6 +671,7 @@ namespace winrt::PretClient
                 {
                     try
                     {
+                        DbgLog("EXCEPTION in install flow");
                         SetStatus(L"Server setup failed.");
                         WorkDone();
                     }
@@ -689,5 +807,1033 @@ namespace winrt::PretClient
         catch (...)
         {
         }
+    }
+
+    namespace
+    {
+        Server::ServerEntry FindEntry(hstring const& id)
+        {
+            try
+            {
+                for (auto const& s : Server::LoadServers())
+                {
+                    if (s.id == id)
+                        return s;
+                }
+            }
+            catch (...)
+            {
+            }
+            return Server::ServerEntry{};
+        }
+
+        hstring EntryLabel(Server::ServerEntry const& s)
+        {
+            try
+            {
+                for (auto const& a : Server::AllSoftware())
+                {
+                    if (a.id == s.software)
+                        return a.label;
+                }
+            }
+            catch (...)
+            {
+            }
+            return s.software;
+        }
+
+        Border DetailCard()
+        {
+            Border card{};
+            card.Background(Theme::CardBrush());
+            card.BorderBrush(Theme::CardStroke());
+            card.BorderThickness(ThicknessHelper::FromUniformLength(1));
+            card.CornerRadius(CornerRadiusHelper::FromUniformRadius(12));
+            card.Padding(ThicknessHelper::FromUniformLength(16));
+            return card;
+        }
+
+        TextBlock SectionHead(wchar_t const* text)
+        {
+            TextBlock head{};
+            head.Text(hstring{ text });
+            head.Style(Application::Current().Resources().Lookup(box_value(L"SubtitleTextBlockStyle")).as<Style>());
+            return head;
+        }
+    } // namespace
+
+    void LocalServerPage::ShowList()
+    {
+        StopDetailSampler();
+        m_detailId = hstring{};
+        m_detailRel.clear();
+        try
+        {
+            m_detail.Children().Clear();
+            m_detail.Visibility(Visibility::Collapsed);
+            m_create.Visibility(Visibility::Visible);
+            m_progress.Visibility(m_working ? Visibility::Visible : Visibility::Collapsed);
+            m_status.Visibility(Visibility::Visible);
+            m_servers.Visibility(Visibility::Visible);
+        }
+        catch (...)
+        {
+        }
+        RefreshServers();
+    }
+
+    void LocalServerPage::OpenDetail(hstring id)
+    {
+        if (FindEntry(id).id.empty())
+            return;
+        m_detailId = id;
+        m_detailRel.clear();
+        try
+        {
+            m_create.Visibility(Visibility::Collapsed);
+            m_progress.Visibility(Visibility::Collapsed);
+            m_status.Visibility(Visibility::Collapsed);
+            m_servers.Visibility(Visibility::Collapsed);
+            m_detail.Visibility(Visibility::Visible);
+        }
+        catch (...)
+        {
+        }
+        BuildDetail();
+    }
+
+    void LocalServerPage::BuildDetail()
+    {
+        try
+        {
+            StopDetailSampler();
+            m_detail.Children().Clear();
+            auto entry = FindEntry(m_detailId);
+            if (entry.id.empty())
+            {
+                ShowList();
+                return;
+            }
+            hstring label = EntryLabel(entry);
+            hstring shown = entry.name.empty() ? entry.id : entry.name;
+            auto dir = Server::ServersDir() / std::wstring{ entry.id };
+
+            // Header card.
+            Border headCard = DetailCard();
+            StackPanel headCol{};
+            headCol.Spacing(8);
+            StackPanel titleRow{};
+            titleRow.Orientation(Orientation::Horizontal);
+            titleRow.Spacing(8);
+            Button back{};
+            back.Content(box_value(L"< Back"));
+            back.Click([this](IInspectable const&, RoutedEventArgs const&) { ShowList(); });
+            titleRow.Children().Append(back);
+            TextBlock title{};
+            title.Text(shown + L"  -  " + label + L" " + entry.mcVersion);
+            title.Style(Application::Current().Resources().Lookup(box_value(L"SubtitleTextBlockStyle")).as<Style>());
+            title.VerticalAlignment(VerticalAlignment::Center);
+            title.TextWrapping(TextWrapping::Wrap);
+            titleRow.Children().Append(title);
+            headCol.Children().Append(titleRow);
+
+            m_dStatus = TextBlock{};
+            m_dStatus.Opacity(0.7);
+            m_dStatus.TextWrapping(TextWrapping::Wrap);
+            headCol.Children().Append(m_dStatus);
+
+            StackPanel btns{};
+            btns.Orientation(Orientation::Horizontal);
+            btns.Spacing(8);
+            m_dStart = Button{};
+            m_dStart.Content(box_value(L"Start"));
+            m_dStart.Click([this](IInspectable const&, RoutedEventArgs const&) {
+                StartServer(m_detailId);
+            });
+            btns.Children().Append(m_dStart);
+            m_dStop = Button{};
+            m_dStop.Content(box_value(L"Stop"));
+            m_dStop.Click([this](IInspectable const&, RoutedEventArgs const&) {
+                Server::StopConsole(m_detailId);
+                m_dStatus.Text(L"Stopping...");
+            });
+            btns.Children().Append(m_dStop);
+            Button folder{};
+            folder.Content(box_value(L"Folder"));
+            folder.Click([dir](IInspectable const&, RoutedEventArgs const&) {
+                try
+                {
+                    ShellExecuteW(nullptr, L"open", dir.wstring().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+                }
+                catch (...)
+                {
+                }
+            });
+            btns.Children().Append(folder);
+            headCol.Children().Append(btns);
+            headCard.Child(headCol);
+            m_detail.Children().Append(headCard);
+
+            // Console card.
+            Border conCard = DetailCard();
+            StackPanel conCol{};
+            conCol.Spacing(8);
+            conCol.Children().Append(SectionHead(L"Console"));
+            m_dScroll = ScrollViewer{};
+            m_dScroll.MaxHeight(260);
+            m_dScroll.VerticalScrollBarVisibility(ScrollBarVisibility::Auto);
+            m_dScroll.HorizontalScrollBarVisibility(ScrollBarVisibility::Disabled);
+            m_dLog = TextBox{};
+            m_dLog.IsReadOnly(true);
+            m_dLog.AcceptsReturn(true);
+            m_dLog.TextWrapping(TextWrapping::Wrap);
+            m_dLog.FontFamily(Media::FontFamily{ L"Consolas" });
+            m_dLog.Background(Theme::LogBackgroundBrush());
+            m_dScroll.Content(m_dLog);
+            conCol.Children().Append(m_dScroll);
+            StackPanel inRow{};
+            inRow.Orientation(Orientation::Horizontal);
+            inRow.Spacing(8);
+            m_dInput = TextBox{};
+            m_dInput.PlaceholderText(L"Server command (e.g. list, op Steve, stop)...");
+            m_dInput.Width(420);
+            m_dInput.KeyDown([this](IInspectable const&, KeyRoutedEventArgs const& e) {
+                try
+                {
+                    if (e.Key() == Windows::System::VirtualKey::Enter)
+                        SendDetailCommand();
+                }
+                catch (...)
+                {
+                }
+            });
+            inRow.Children().Append(m_dInput);
+            Button send{};
+            send.Content(box_value(L"Send"));
+            send.Click([this](IInspectable const&, RoutedEventArgs const&) { SendDetailCommand(); });
+            inRow.Children().Append(send);
+            conCol.Children().Append(inRow);
+            conCard.Child(conCol);
+            m_detail.Children().Append(conCard);
+
+            // Resources card.
+            Border resCard = DetailCard();
+            StackPanel resCol{};
+            resCol.Spacing(8);
+            resCol.Children().Append(SectionHead(L"Resources"));
+            m_dProc = TextBlock{};
+            m_dProc.Opacity(0.7);
+            m_dProc.TextWrapping(TextWrapping::Wrap);
+            resCol.Children().Append(m_dProc);
+            auto addGraph = [&](wchar_t const* name, TextBlock& value, Polyline& line,
+                Windows::UI::Color color) {
+                StackPanel row{};
+                row.Spacing(4);
+                StackPanel top{};
+                top.Orientation(Orientation::Horizontal);
+                top.Spacing(8);
+                TextBlock lab{};
+                lab.Text(hstring{ name });
+                lab.FontWeight(Windows::UI::Text::FontWeights::SemiBold());
+                value = TextBlock{};
+                value.Opacity(0.7);
+                top.Children().Append(lab);
+                top.Children().Append(value);
+                row.Children().Append(top);
+                line = Polyline{};
+                line.Stroke(Media::SolidColorBrush{ color });
+                line.StrokeThickness(2);
+                Canvas canvas{};
+                canvas.Width(kGraphW);
+                canvas.Height(kGraphH);
+                canvas.Children().Append(line);
+                Border frame{};
+                frame.Child(canvas);
+                frame.Background(Theme::LogBackgroundBrush());
+                frame.BorderBrush(Theme::CardStroke());
+                frame.BorderThickness(ThicknessHelper::FromUniformLength(1));
+                frame.CornerRadius(CornerRadiusHelper::FromUniformRadius(8));
+                frame.Padding(ThicknessHelper::FromUniformLength(4));
+                row.Children().Append(frame);
+                resCol.Children().Append(row);
+            };
+            m_dCpuValue = TextBlock{};
+            m_dMemValue = TextBlock{};
+            m_dDiskValue = TextBlock{};
+            m_dCpuLine = Polyline{};
+            m_dMemLine = Polyline{};
+            m_dDiskLine = Polyline{};
+            addGraph(L"CPU", m_dCpuValue, m_dCpuLine,
+                Windows::UI::ColorHelper::FromArgb(0xFF, 0x44, 0xBD, 0x32));
+            addGraph(L"Memory", m_dMemValue, m_dMemLine,
+                Windows::UI::ColorHelper::FromArgb(0xFF, 0x4C, 0xC2, 0xFF));
+            addGraph(L"Storage", m_dDiskValue, m_dDiskLine,
+                Windows::UI::ColorHelper::FromArgb(0xFF, 0xE0, 0xA6, 0x3C));
+            resCard.Child(resCol);
+            m_detail.Children().Append(resCard);
+
+            // Content cards: plugins and/or mods depending on software.
+            hstring modLoader = ModLoaderFor(entry.software);
+            if (PluginsFor(entry.software))
+            {
+                Border plugCard = DetailCard();
+                StackPanel plugCol{};
+                plugCol.Spacing(8);
+                plugCol.Children().Append(SectionHead(L"Plugins (Modrinth)"));
+                StackPanel searchRow{};
+                searchRow.Orientation(Orientation::Horizontal);
+                searchRow.Spacing(8);
+                m_dPluginQuery = TextBox{};
+                m_dPluginQuery.PlaceholderText(L"Search plugins...");
+                m_dPluginQuery.Width(320);
+                searchRow.Children().Append(m_dPluginQuery);
+                Button go{};
+                go.Content(box_value(L"Search"));
+                go.Click([this](IInspectable const&, RoutedEventArgs const&) { SearchServerContent(true); });
+                searchRow.Children().Append(go);
+                plugCol.Children().Append(searchRow);
+                m_dPluginStatus = TextBlock{};
+                m_dPluginStatus.Opacity(0.7);
+                plugCol.Children().Append(m_dPluginStatus);
+                m_dPluginResults = StackPanel{};
+                m_dPluginResults.Spacing(6);
+                plugCol.Children().Append(m_dPluginResults);
+                plugCard.Child(plugCol);
+                m_detail.Children().Append(plugCard);
+            }
+            if (!modLoader.empty())
+            {
+                Border modCard = DetailCard();
+                StackPanel modCol{};
+                modCol.Spacing(8);
+                modCol.Children().Append(SectionHead(L"Mods (Modrinth)"));
+                StackPanel searchRow{};
+                searchRow.Orientation(Orientation::Horizontal);
+                searchRow.Spacing(8);
+                m_dModQuery = TextBox{};
+                m_dModQuery.PlaceholderText(L"Search mods...");
+                m_dModQuery.Width(320);
+                searchRow.Children().Append(m_dModQuery);
+                Button go{};
+                go.Content(box_value(L"Search"));
+                go.Click([this](IInspectable const&, RoutedEventArgs const&) { SearchServerContent(false); });
+                searchRow.Children().Append(go);
+                modCol.Children().Append(searchRow);
+                m_dModStatus = TextBlock{};
+                m_dModStatus.Opacity(0.7);
+                modCol.Children().Append(m_dModStatus);
+                m_dModResults = StackPanel{};
+                m_dModResults.Spacing(6);
+                modCol.Children().Append(m_dModResults);
+                modCard.Child(modCol);
+                m_detail.Children().Append(modCard);
+            }
+            if (!PluginsFor(entry.software) && modLoader.empty())
+            {
+                Border note = DetailCard();
+                TextBlock t{};
+                t.Opacity(0.7);
+                t.TextWrapping(TextWrapping::Wrap);
+                t.Text(L"No Modrinth content for this software. Drop jars into the folder manually.");
+                note.Child(t);
+                m_detail.Children().Append(note);
+            }
+
+            // Files card.
+            Border fileCard = DetailCard();
+            StackPanel fileCol{};
+            fileCol.Spacing(8);
+            fileCol.Children().Append(SectionHead(L"Files"));
+            m_dFilePath = TextBlock{};
+            m_dFilePath.Opacity(0.7);
+            fileCol.Children().Append(m_dFilePath);
+            m_dFileList = StackPanel{};
+            m_dFileList.Spacing(4);
+            fileCol.Children().Append(m_dFileList);
+            fileCard.Child(fileCol);
+            m_detail.Children().Append(fileCard);
+
+            // Backups card.
+            Border bakCard = DetailCard();
+            StackPanel bakCol{};
+            bakCol.Spacing(8);
+            bakCol.Children().Append(SectionHead(L"Backups"));
+            Button bakNow{};
+            bakNow.Content(box_value(L"Back up now"));
+            bakNow.Click([this](IInspectable const&, RoutedEventArgs const&) { BackupNow(); });
+            bakCol.Children().Append(bakNow);
+            m_dBackupStatus = TextBlock{};
+            m_dBackupStatus.Opacity(0.7);
+            m_dBackupStatus.TextWrapping(TextWrapping::Wrap);
+            bakCol.Children().Append(m_dBackupStatus);
+            m_dBackupList = StackPanel{};
+            m_dBackupList.Spacing(4);
+            bakCol.Children().Append(m_dBackupList);
+            bakCard.Child(bakCol);
+            m_detail.Children().Append(bakCard);
+
+            auto bit = m_backlog.find(std::wstring{ m_detailId });
+            if (bit != m_backlog.end())
+                m_dLog.Text(bit->second);
+            UpdateDetailStatus();
+            RefreshDetailFiles();
+            RefreshDetailBackups();
+            StartDetailSampler();
+            try
+            {
+                m_ui.TryEnqueue([this] {
+                    try
+                    {
+                        if (m_dScroll)
+                            m_dScroll.ChangeView(nullptr,
+                                box_value(m_dScroll.ScrollableHeight()), nullptr);
+                    }
+                    catch (...)
+                    {
+                    }
+                });
+            }
+            catch (...)
+            {
+            }
+        }
+        catch (...)
+        {
+        }
+    }
+
+    void LocalServerPage::UpdateDetailStatus()
+    {
+        try
+        {
+            if (m_detailId.empty() || !m_dStatus)
+                return;
+            bool running = Server::ConsoleRunning(m_detailId);
+            m_dStatus.Text(running ? L"Status: running" : L"Status: stopped");
+            if (m_dStart)
+                m_dStart.IsEnabled(!running);
+            if (m_dStop)
+                m_dStop.IsEnabled(running);
+        }
+        catch (...)
+        {
+        }
+    }
+
+    fire_and_forget LocalServerPage::StartServer(hstring id)
+    {
+        if (id.empty() || Server::ConsoleRunning(id))
+            return;
+        auto entry = FindEntry(id);
+        if (entry.id.empty())
+            return;
+        auto dir = Server::ServersDir() / std::wstring{ id };
+        auto jar = Server::FindServerJar(dir);
+        if (jar.empty())
+        {
+            SetStatus(L"No server jar found - open the Folder and check the install.");
+            if (id == m_detailId && m_dStatus)
+                m_dStatus.Text(L"No server jar found - open the Folder and check the install.");
+            return;
+        }
+        SetStatus(L"Starting server...");
+        if (id == m_detailId && m_dStatus)
+            m_dStatus.Text(L"Starting server...");
+        int mem = 2048;
+        try
+        {
+            auto st = LoadSettings();
+            if (st.maxMemMb >= 512)
+                mem = st.maxMemMb;
+        }
+        catch (...)
+        {
+        }
+        co_await winrt::resume_background();
+        hstring java = Java::Pick(Server::RequiredJava(entry.mcVersion));
+        hstring err;
+        bool ok = false;
+        if (!java.empty())
+            ok = Server::StartConsole(id, dir, jar, java, mem, err);
+        else
+            err = L"No Java found. Install a 64-bit Java or set java.exe in Settings.";
+        co_await ForegroundAwait{ m_ui };
+        if (ok)
+        {
+            DbgLog("console started " + to_string(std::wstring{ id }));
+            SetStatus(L"Server running.");
+        }
+        else
+        {
+            SetStatus(L"Could not start: " + err);
+            if (id == m_detailId && m_dStatus)
+                m_dStatus.Text(L"Could not start: " + err);
+        }
+        RefreshServers();
+        UpdateDetailStatus();
+    }
+
+    void LocalServerPage::SendDetailCommand()
+    {
+        try
+        {
+            if (m_detailId.empty())
+                return;
+            if (!Server::ConsoleRunning(m_detailId))
+            {
+                if (m_dStatus)
+                    m_dStatus.Text(L"Server is not running.");
+                return;
+            }
+            hstring cmd = m_dInput.Text();
+            std::wstring line{ cmd };
+            while (!line.empty() && (line.back() == L'\n' || line.back() == L'\r' ||
+                                     line.back() == L' ' || line.back() == L'\t'))
+                line.pop_back();
+            if (line.empty())
+                return;
+            Server::SendConsole(m_detailId, line);
+            auto& back = m_backlog[std::wstring{ m_detailId }];
+            back += L"> " + hstring{ line } + L"\n";
+            if (m_backlog.size() > 0 && back.size() > 220000)
+            {
+                auto pos = back.find(L'\n', 20000);
+                if (pos != std::wstring::npos)
+                    back.erase(0, pos + 1);
+            }
+            m_dInput.Text(L"");
+            if (m_dLog)
+                m_dLog.Text(back);
+        }
+        catch (...)
+        {
+        }
+    }
+
+    void LocalServerPage::AppendConsole(hstring id, std::string const& line, bool exited, int exitCode)
+    {
+        try
+        {
+            std::wstring key{ id };
+            auto& back = m_backlog[key];
+            if (!line.empty())
+                back += to_hstring(line) + L"\n";
+            if (exited)
+                back += L"--- process exited (" + to_hstring(exitCode) + L") ---\n";
+            if (back.size() > 220000)
+            {
+                auto pos = back.find(L'\n', 20000);
+                if (pos != std::wstring::npos)
+                    back.erase(0, pos + 1);
+            }
+            if (id == m_detailId && m_detail.Visibility() == Visibility::Visible && m_dLog)
+            {
+                m_dLog.Text(back);
+                try
+                {
+                    if (m_dScroll)
+                        m_dScroll.ChangeView(
+                            nullptr, box_value(m_dScroll.ScrollableHeight()), nullptr);
+                }
+                catch (...)
+                {
+                }
+            }
+            if (exited)
+            {
+                UpdateDetailStatus();
+                RefreshServers();
+            }
+        }
+        catch (...)
+        {
+        }
+    }
+
+    void LocalServerPage::SearchServerContent(bool plugins)
+    {
+        try
+        {
+            auto entry = FindEntry(m_detailId);
+            if (entry.id.empty())
+                return;
+            TextBox& query = plugins ? m_dPluginQuery : m_dModQuery;
+            StackPanel& results = plugins ? m_dPluginResults : m_dModResults;
+            TextBlock& status = plugins ? m_dPluginStatus : m_dModStatus;
+            if (!query || !results || !status)
+                return; // section not built for this software
+            hstring q = query.Text();
+            hstring loader = plugins ? hstring{} : ModLoaderFor(entry.software);
+            hstring mc = entry.mcVersion;
+            hstring sw = entry.software;
+            status.Text(L"Searching Modrinth...");
+            results.Children().Clear();
+            Modrinth::SearchAsync(q, mc, loader, 0,
+                [this, plugins, mc, sw](Modrinth::SearchResult r) {
+                    try
+                    {
+                        StackPanel& results2 = plugins ? m_dPluginResults : m_dModResults;
+                        TextBlock& status2 = plugins ? m_dPluginStatus : m_dModStatus;
+                        if (!results2 || !status2)
+                            return;
+                        results2.Children().Clear();
+                        if (r.hits.empty())
+                        {
+                            status2.Text(L"No results.");
+                            return;
+                        }
+                        status2.Text(to_hstring(static_cast<long long>(r.hits.size())) + L" result(s)");
+                        for (auto const& hit : r.hits)
+                        {
+                            StackPanel row{};
+                            row.Orientation(Orientation::Horizontal);
+                            row.Spacing(8);
+                            row.VerticalAlignment(VerticalAlignment::Center);
+                            TextBlock t{};
+                            t.Text(hit.title);
+                            t.Width(300);
+                            t.TextTrimming(TextTrimming::CharacterEllipsis);
+                            t.VerticalAlignment(VerticalAlignment::Center);
+                            row.Children().Append(t);
+                            Button inst{};
+                            inst.Content(box_value(L"Install"));
+                            inst.Click([this, plugins, slug = hit.slug, title = hit.title](
+                                           IInspectable const&, RoutedEventArgs const&) {
+                                InstallServerContent(plugins, slug, title);
+                            });
+                            row.Children().Append(inst);
+                            results2.Children().Append(row);
+                        }
+                    }
+                    catch (...)
+                    {
+                    }
+                },
+                plugins ? hstring{ L"plugin" } : hstring{ L"mod" });
+        }
+        catch (...)
+        {
+        }
+    }
+
+    void LocalServerPage::InstallServerContent(bool plugins, hstring slug, hstring title)
+    {
+        auto entry = FindEntry(m_detailId);
+        if (entry.id.empty())
+            return;
+        auto destDir = Server::ServersDir() / std::wstring{ entry.id } /
+            (plugins ? L"plugins" : L"mods");
+        try
+        {
+            std::error_code ec;
+            std::filesystem::create_directories(destDir, ec);
+        }
+        catch (...)
+        {
+        }
+        TextBlock& status = plugins ? m_dPluginStatus : m_dModStatus;
+        if (status)
+            status.Text(L"Resolving " + title + L"...");
+        hstring mc = entry.mcVersion;
+        Modrinth::PickFileAsync(slug, mc, L"",
+            [this, plugins, destDir, title](Modrinth::ModFile f) -> fire_and_forget {
+                try
+                {
+                    TextBlock& status2 = plugins ? m_dPluginStatus : m_dModStatus;
+                    if (f.url.empty())
+                    {
+                        if (status2)
+                            status2.Text(L"No compatible file found for this version.");
+                        co_return;
+                    }
+                    if (status2)
+                        status2.Text(L"Downloading " + f.filename + L"...");
+                    hstring err = co_await Modrinth::DownloadFileAsync(f, destDir.wstring());
+                    if (status2)
+                        status2.Text(err.empty() ? (L"Installed " + f.filename) : err);
+                }
+                catch (...)
+                {
+                }
+            });
+    }
+
+    void LocalServerPage::RefreshDetailFiles()
+    {
+        try
+        {
+            if (!m_dFilePath || !m_dFileList)
+                return;
+            auto entry = FindEntry(m_detailId);
+            if (entry.id.empty())
+                return;
+            auto root = Server::ServersDir() / std::wstring{ entry.id };
+            auto base = m_detailRel.empty() ? root : root / m_detailRel;
+            m_dFilePath.Text(L"Files: /" + hstring{ m_detailRel });
+            m_dFileList.Children().Clear();
+            std::error_code ec;
+            if (!std::filesystem::exists(base, ec))
+                return;
+            if (!m_detailRel.empty())
+            {
+                Button up{};
+                up.Content(box_value(L".. (up)"));
+                up.Click([this](IInspectable const&, RoutedEventArgs const&) {
+                    try
+                    {
+                        auto p = std::filesystem::path{ m_detailRel }.parent_path().wstring();
+                        m_detailRel = (p == L"." || p == L"/") ? std::wstring{} : p;
+                        RefreshDetailFiles();
+                    }
+                    catch (...)
+                    {
+                    }
+                });
+                m_dFileList.Children().Append(up);
+            }
+            std::vector<std::filesystem::directory_entry> dirs;
+            std::vector<std::filesystem::directory_entry> files;
+            for (auto const& e : std::filesystem::directory_iterator(base, ec))
+            {
+                try
+                {
+                    if (e.is_directory(ec))
+                        dirs.push_back(e);
+                    else if (e.is_regular_file(ec))
+                        files.push_back(e);
+                }
+                catch (...)
+                {
+                }
+            }
+            auto byName = [](auto const& a, auto const& b) {
+                return a.path().filename().wstring() < b.path().filename().wstring();
+            };
+            std::sort(dirs.begin(), dirs.end(), byName);
+            std::sort(files.begin(), files.end(), byName);
+            auto addRow = [this](std::filesystem::path p, bool isDir, unsigned long long size) {
+                StackPanel row{};
+                row.Orientation(Orientation::Horizontal);
+                row.Spacing(8);
+                row.VerticalAlignment(VerticalAlignment::Center);
+                Button open{};
+                open.Content(box_value(hstring{ (isDir ? L"[dir] " : L"") + p.filename().wstring() }));
+                open.Click([this, p, isDir](IInspectable const&, RoutedEventArgs const&) {
+                    try
+                    {
+                        if (isDir)
+                        {
+                            auto root2 = Server::ServersDir() / std::wstring{ m_detailId };
+                            auto rel = std::filesystem::relative(p, root2).wstring();
+                            m_detailRel = (rel == L"." ? std::wstring{} : rel);
+                            RefreshDetailFiles();
+                        }
+                        else
+                        {
+                            ShellExecuteW(nullptr, L"open", p.wstring().c_str(),
+                                nullptr, nullptr, SW_SHOWNORMAL);
+                        }
+                    }
+                    catch (...)
+                    {
+                    }
+                });
+                row.Children().Append(open);
+                if (!isDir)
+                {
+                    TextBlock sz{};
+                    sz.Text(FmtSize(size));
+                    sz.Opacity(0.6);
+                    sz.VerticalAlignment(VerticalAlignment::Center);
+                    row.Children().Append(sz);
+                }
+                Button del{};
+                del.Content(box_value(L"Delete"));
+                del.Click([this, p, isDir](IInspectable const&, RoutedEventArgs const&) {
+                    try
+                    {
+                        std::error_code ec2;
+                        if (isDir)
+                            std::filesystem::remove_all(p, ec2);
+                        else
+                            std::filesystem::remove(p, ec2);
+                        if (ec2)
+                            m_dStatus.Text(L"Delete failed.");
+                        RefreshDetailFiles();
+                    }
+                    catch (...)
+                    {
+                    }
+                });
+                row.Children().Append(del);
+                m_dFileList.Children().Append(row);
+            };
+            for (auto const& d : dirs)
+                addRow(d.path(), true, 0);
+            for (auto const& f : files)
+            {
+                std::error_code ec2;
+                addRow(f.path(), false, std::filesystem::file_size(f.path(), ec2));
+            }
+        }
+        catch (...)
+        {
+        }
+    }
+
+    void LocalServerPage::RefreshDetailBackups()
+    {
+        try
+        {
+            if (!m_dBackupList)
+                return;
+            m_dBackupList.Children().Clear();
+            auto entry = FindEntry(m_detailId);
+            if (entry.id.empty())
+                return;
+            auto bakDir = Server::ServersDir() / std::wstring{ entry.id } / L"backups";
+            std::error_code ec;
+            std::vector<std::filesystem::path> files;
+            if (std::filesystem::exists(bakDir, ec))
+            {
+                for (auto const& e : std::filesystem::directory_iterator(bakDir, ec))
+                {
+                    try
+                    {
+                        if (e.is_regular_file(ec) && e.path().extension() == L".gz")
+                            files.push_back(e.path());
+                    }
+                    catch (...)
+                    {
+                    }
+                }
+            }
+            std::sort(files.begin(), files.end(),
+                [](auto const& a, auto const& b) { return a.filename() > b.filename(); });
+            if (files.empty())
+            {
+                TextBlock t{};
+                t.Opacity(0.6);
+                t.Text(L"No backups yet.");
+                m_dBackupList.Children().Append(t);
+                return;
+            }
+            for (auto const& f : files)
+            {
+                StackPanel row{};
+                row.Orientation(Orientation::Horizontal);
+                row.Spacing(8);
+                row.VerticalAlignment(VerticalAlignment::Center);
+                TextBlock t{};
+                std::error_code ec2;
+                t.Text(hstring{ f.filename().wstring() } + L"  (" +
+                    FmtSize(std::filesystem::file_size(f, ec2)) + L")");
+                t.VerticalAlignment(VerticalAlignment::Center);
+                t.Width(320);
+                t.TextTrimming(TextTrimming::CharacterEllipsis);
+                row.Children().Append(t);
+                Button restore{};
+                restore.Content(box_value(L"Restore"));
+                restore.Click([this, f](IInspectable const&, RoutedEventArgs const&) {
+                    RestoreBackup(f);
+                });
+                row.Children().Append(restore);
+                Button del{};
+                del.Content(box_value(L"Delete"));
+                del.Click([this, f](IInspectable const&, RoutedEventArgs const&) {
+                    try
+                    {
+                        std::error_code ec3;
+                        std::filesystem::remove(f, ec3);
+                        RefreshDetailBackups();
+                    }
+                    catch (...)
+                    {
+                    }
+                });
+                row.Children().Append(del);
+                m_dBackupList.Children().Append(row);
+            }
+        }
+        catch (...)
+        {
+        }
+    }
+
+    fire_and_forget LocalServerPage::BackupNow()
+    {
+        auto entry = FindEntry(m_detailId);
+        if (entry.id.empty())
+            co_return;
+        auto dir = Server::ServersDir() / std::wstring{ entry.id };
+        hstring name = entry.name.empty() ? entry.id : entry.name;
+        if (m_dBackupStatus)
+            m_dBackupStatus.Text(L"Backing up...");
+        hstring err = co_await Server::BackupServerAsync(dir, name);
+        if (m_dBackupStatus)
+            m_dBackupStatus.Text(err.empty() ? L"Backup complete." : err);
+        RefreshDetailBackups();
+    }
+
+    fire_and_forget LocalServerPage::RestoreBackup(std::filesystem::path file)
+    {
+        auto entry = FindEntry(m_detailId);
+        if (entry.id.empty())
+            co_return;
+        if (Server::ConsoleRunning(entry.id))
+        {
+            if (m_dBackupStatus)
+                m_dBackupStatus.Text(L"Stop the server before restoring.");
+            co_return;
+        }
+        auto dir = Server::ServersDir() / std::wstring{ entry.id };
+        if (m_dBackupStatus)
+            m_dBackupStatus.Text(L"Restoring...");
+        hstring err = co_await Server::RestoreBackupAsync(dir, file);
+        if (m_dBackupStatus)
+            m_dBackupStatus.Text(err.empty() ? L"Restore complete." : err);
+        RefreshDetailFiles();
+        RefreshDetailBackups();
+    }
+
+    void LocalServerPage::StartDetailSampler()
+    {
+        try
+        {
+            StopDetailSampler();
+            int gen = ++m_detailGen;
+            m_detailStop = false;
+            m_dCpuHist.clear();
+            m_dMemHist.clear();
+            m_dDiskHist.clear();
+            hstring id = m_detailId;
+            auto dir = Server::ServersDir() / std::wstring{ id };
+            std::thread([this, gen, id, dir] {
+                try
+                {
+                    m_sampler.PollProcessCpu(Server::ConsoleHandle(id)); // seed baseline
+                    for (;;)
+                    {
+                        std::this_thread::sleep_for(std::chrono::seconds(1));
+                        if (m_detailStop || gen != m_detailGen)
+                            return;
+                        SystemStats::SystemSnapshot snap{};
+                        double pcpu = -1.0;
+                        unsigned long long pmem = 0;
+                        unsigned long long freeAv = 0;
+                        unsigned long long total = 0;
+                        unsigned long long memTot = 0;
+                        unsigned long long memAv = 0;
+                        bool diskOk = false;
+                        {
+                            std::lock_guard<std::mutex> lk(m_samplerMutex);
+                            snap = m_sampler.PollSystem();
+                            if (void* h = Server::ConsoleHandle(id))
+                            {
+                                pcpu = m_sampler.PollProcessCpu(h);
+                                pmem = m_sampler.ProcessPrivateBytes(h);
+                            }
+                        }
+                        ULARGE_INTEGER freeA{}, tot{}, dummy{};
+                        if (GetDiskFreeSpaceExW(dir.wstring().c_str(), &freeA, &tot, &dummy) &&
+                            tot.QuadPart > 0)
+                        {
+                            diskOk = true;
+                            freeAv = freeA.QuadPart;
+                            total = tot.QuadPart;
+                        }
+                        memTot = snap.memTotalBytes;
+                        memAv = snap.memAvailBytes;
+                        try
+                        {
+                            m_ui.TryEnqueue(
+                                [this, gen, snap, pcpu, pmem, freeAv, total, memTot, memAv, diskOk] {
+                                    try
+                                    {
+                                        if (gen != m_detailGen)
+                                            return;
+                                        double cpu = snap.cpuPercent < 0.0
+                                            ? (m_dCpuHist.empty() ? 0.0 : m_dCpuHist.back())
+                                            : snap.cpuPercent;
+                                        double memPct = (memTot == 0) ? 0.0
+                                            : 100.0 * (1.0 - static_cast<double>(memAv) /
+                                                                  static_cast<double>(memTot));
+                                        double diskPct = (!diskOk || total == 0) ? 0.0
+                                            : 100.0 * (1.0 - static_cast<double>(freeAv) /
+                                                                  static_cast<double>(total));
+                                        m_dCpuHist.push_back(cpu);
+                                        m_dMemHist.push_back(memPct);
+                                        m_dDiskHist.push_back(diskPct);
+                                        while (m_dCpuHist.size() > kSamples)
+                                            m_dCpuHist.pop_front();
+                                        while (m_dMemHist.size() > kSamples)
+                                            m_dMemHist.pop_front();
+                                        while (m_dDiskHist.size() > kSamples)
+                                            m_dDiskHist.pop_front();
+                                        wchar_t buf[160]{};
+                                        swprintf_s(buf, L"%.0f%%", cpu);
+                                        if (m_dCpuValue)
+                                            m_dCpuValue.Text(buf);
+                                        if (memTot > 0 && m_dMemValue)
+                                        {
+                                            swprintf_s(buf, L"%.0f%% (%s / %s)", memPct,
+                                                GbText(memTot - memAv).c_str(),
+                                                GbText(memTot).c_str());
+                                            m_dMemValue.Text(buf);
+                                        }
+                                        if (diskOk && m_dDiskValue)
+                                        {
+                                            swprintf_s(buf, L"%.0f%% used (%s free)", diskPct,
+                                                GbText(freeAv).c_str());
+                                            m_dDiskValue.Text(buf);
+                                        }
+                                        if (m_dCpuLine)
+                                            PaintGraph(m_dCpuLine, m_dCpuHist);
+                                        if (m_dMemLine)
+                                            PaintGraph(m_dMemLine, m_dMemHist);
+                                        if (m_dDiskLine)
+                                            PaintGraph(m_dDiskLine, m_dDiskHist);
+                                        if (m_dProc)
+                                        {
+                                            if (pcpu < 0.0 && pmem == 0)
+                                            {
+                                                m_dProc.Text(Server::ConsoleRunning(id)
+                                                        ? L"Server process: starting..."
+                                                        : L"Server process: stopped");
+                                            }
+                                            else
+                                            {
+                                                swprintf_s(buf, L"Server process: %.0f%% CPU, %s RAM",
+                                                    (std::max)(0.0, pcpu), GbText(pmem).c_str());
+                                                m_dProc.Text(buf);
+                                            }
+                                        }
+                                    }
+                                    catch (...)
+                                    {
+                                    }
+                                });
+                        }
+                        catch (...)
+                        {
+                            return;
+                        }
+                    }
+                }
+                catch (...)
+                {
+                }
+            }).detach();
+        }
+        catch (...)
+        {
+        }
+    }
+
+    void LocalServerPage::StopDetailSampler()
+    {
+        m_detailStop = true;
+        ++m_detailGen;
     }
 }

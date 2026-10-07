@@ -3,9 +3,9 @@
 #include <map>
 #include "Downloader.h"
 
-// Offline launch: offline UUID, full java command from the prepared game
-// (modern `arguments` and legacy `minecraftArguments`), plus process
-// tracking for play / stop / restart.
+// Online + offline launch: offline UUID or Microsoft session, full java
+// command from the prepared game (modern `arguments` and legacy
+// `minecraftArguments`), plus process tracking for play / stop / restart.
 namespace winrt::PretClient::Launcher
 {
     struct Command
@@ -17,6 +17,7 @@ namespace winrt::PretClient::Launcher
 
     hstring OfflineUuid(hstring username);
     Command BuildCommand(Downloader::PreparedGame const& game, hstring username, hstring uuid,
+        hstring accessToken, hstring userType, hstring xuid,
         int minMemMb, int maxMemMb, hstring javaExe);
 
     // Process sessions, keyed by instance id.

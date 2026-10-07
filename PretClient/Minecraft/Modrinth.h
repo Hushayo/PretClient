@@ -46,7 +46,8 @@ namespace winrt::PretClient::Modrinth
     using PickFn = std::function<void(ModFile)>;
 
     winrt::fire_and_forget SearchAsync(
-        hstring query, hstring mcVersion, hstring loader, int offset, SearchFn done);
+        hstring query, hstring mcVersion, hstring loader, int offset, SearchFn done,
+        hstring projectType = L"mod");
     winrt::fire_and_forget GetVersionsAsync(
         hstring projectIdOrSlug, hstring mcVersion, hstring loader, VersionsFn done);
     winrt::fire_and_forget PickFileAsync(hstring projectIdOrSlug, hstring mcVersion, hstring loader, PickFn done);

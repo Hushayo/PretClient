@@ -9,7 +9,9 @@
 #include <coroutine>
 #include <cwctype>
 #include <fstream>
+#include <mutex>
 #include <set>
+#include <thread>
 
 using namespace winrt;
 using namespace Windows::Data::Json;
@@ -844,6 +846,392 @@ namespace winrt::PretClient::Server
         {
         }
         co_return code;
+    }
+
+    namespace Console
+    {
+        struct Proc
+        {
+            HANDLE hProcess = nullptr;
+            HANDLE hThread = nullptr;
+            HANDLE hInW = nullptr; // parent -> child stdin
+            HANDLE hOutR = nullptr; // child stdout/stderr -> parent
+            bool closed = false;
+        };
+
+        std::mutex g_mutex{};
+        std::map<std::wstring, Proc> g_procs{};
+        ConsoleLineFn g_sink{};
+
+        void Sink(hstring id, std::string line, bool exited, int exitCode)
+        {
+            ConsoleLineFn fn;
+            try
+            {
+                std::lock_guard<std::mutex> lk(g_mutex);
+                fn = g_sink;
+            }
+            catch (...)
+            {
+            }
+            if (fn)
+            {
+                try
+                {
+                    fn(id, line, exited, exitCode);
+                }
+                catch (...)
+                {
+                }
+            }
+        }
+
+        void CloseProc(std::wstring const& id)
+        {
+            try
+            {
+                std::lock_guard<std::mutex> lk(g_mutex);
+                auto it = g_procs.find(id);
+                if (it == g_procs.end() || it->second.closed)
+                    return;
+                it->second.closed = true;
+                HANDLE hs[] = { it->second.hProcess, it->second.hThread,
+                    it->second.hInW, it->second.hOutR };
+                for (HANDLE h : hs)
+                {
+                    if (h)
+                        CloseHandle(h);
+                }
+                g_procs.erase(it);
+            }
+            catch (...)
+            {
+            }
+        }
+
+        // Reads the merged stdout/stderr pipe until the child dies, then
+        // reports the exit and releases the handles. Never touches the UI.
+        void Pump(std::wstring id, HANDLE hOut, HANDLE hProcess)
+        {
+            char buf[4096];
+            std::string carry;
+            for (;;)
+            {
+                DWORD got = 0;
+                if (!ReadFile(hOut, buf, sizeof(buf), &got, nullptr) || got == 0)
+                    break;
+                carry.append(buf, got);
+                size_t pos = 0;
+                while ((pos = carry.find('\n')) != std::string::npos)
+                {
+                    std::string line = carry.substr(0, pos);
+                    if (!line.empty() && line.back() == '\r')
+                        line.pop_back();
+                    Sink(hstring{ id }, line, false, 0);
+                    carry.erase(0, pos + 1);
+                }
+            }
+            if (!carry.empty())
+                Sink(hstring{ id }, carry, false, 0);
+            DWORD code = 1;
+            GetExitCodeProcess(hProcess, &code);
+            Sink(hstring{ id }, std::string{}, true, static_cast<int>(code));
+            CloseProc(id);
+        }
+    } // namespace Console
+
+    void SetConsoleSink(ConsoleLineFn fn)
+    {
+        try
+        {
+            std::lock_guard<std::mutex> lk(Console::g_mutex);
+            Console::g_sink = std::move(fn);
+        }
+        catch (...)
+        {
+        }
+    }
+
+    bool ConsoleRunning(hstring const& id)
+    {
+        try
+        {
+            std::lock_guard<std::mutex> lk(Console::g_mutex);
+            auto it = Console::g_procs.find(std::wstring{ id });
+            return it != Console::g_procs.end() && !it->second.closed;
+        }
+        catch (...)
+        {
+        }
+        return false;
+    }
+
+    void* ConsoleHandle(hstring const& id)
+    {
+        try
+        {
+            std::lock_guard<std::mutex> lk(Console::g_mutex);
+            auto it = Console::g_procs.find(std::wstring{ id });
+            if (it != Console::g_procs.end() && !it->second.closed)
+                return static_cast<void*>(it->second.hProcess);
+        }
+        catch (...)
+        {
+        }
+        return nullptr;
+    }
+
+    std::filesystem::path FindServerJar(std::filesystem::path const& dir)
+    {
+        try
+        {
+            std::error_code ec;
+            auto direct = dir / L"server.jar";
+            if (std::filesystem::exists(direct, ec))
+                return direct;
+            std::vector<std::filesystem::path> cands;
+            for (auto const& e : std::filesystem::directory_iterator(dir, ec))
+            {
+                if (!e.is_regular_file(ec))
+                    continue;
+                auto p = e.path();
+                if (p.extension() != L".jar")
+                    continue;
+                std::wstring n = p.filename().wstring();
+                std::wstring low = n;
+                for (auto& c : low)
+                    c = static_cast<wchar_t>(towlower(c));
+                if (low.find(L"installer") != std::wstring::npos || low == L"buildtools.jar")
+                    continue;
+                if (low.rfind(L"spigot-", 0) == 0 || low.rfind(L"minecraft_server", 0) == 0)
+                    return p; // preferred names win immediately
+                cands.push_back(p);
+            }
+            if (!cands.empty())
+                return cands.front();
+        }
+        catch (...)
+        {
+        }
+        return std::filesystem::path{};
+    }
+
+    bool StartConsole(hstring const& id, std::filesystem::path const& dir,
+        std::filesystem::path const& jar, hstring const& javaExe, int maxMemMb, hstring& error)
+    {
+        error.clear();
+        try
+        {
+            {
+                std::lock_guard<std::mutex> lk(Console::g_mutex);
+                if (Console::g_procs.find(std::wstring{ id }) != Console::g_procs.end())
+                {
+                    error = L"Already running.";
+                    return false;
+                }
+            }
+            if (maxMemMb < 512)
+                maxMemMb = 2048;
+            std::wstring cmd = L"\"" + std::wstring{ javaExe } + L"\" -Xmx" +
+                std::to_wstring(maxMemMb) + L"M -jar \"" + jar.wstring() + L"\" nogui";
+
+            SECURITY_ATTRIBUTES sa{ sizeof(sa), nullptr, TRUE };
+            HANDLE outR = nullptr;
+            HANDLE outW = nullptr;
+            HANDLE inR = nullptr;
+            HANDLE inW = nullptr;
+            if (!CreatePipe(&outR, &outW, &sa, 0) || !CreatePipe(&inR, &inW, &sa, 0))
+            {
+                HANDLE hs[] = { outR, outW, inR, inW };
+                for (HANDLE h : hs)
+                {
+                    if (h)
+                        CloseHandle(h);
+                }
+                error = L"Could not create pipes.";
+                return false;
+            }
+            SetHandleInformation(outR, HANDLE_FLAG_INHERIT, 0);
+            SetHandleInformation(inW, HANDLE_FLAG_INHERIT, 0);
+
+            STARTUPINFOW si{ sizeof(si) };
+            si.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
+            si.wShowWindow = SW_HIDE;
+            si.hStdOutput = outW;
+            si.hStdError = outW; // merged into the one pump
+            si.hStdInput = inR;
+            PROCESS_INFORMATION pi{};
+            std::wstring mutableCmd = cmd;
+            std::wstring work = dir.wstring();
+            BOOL launched = CreateProcessW(nullptr, mutableCmd.data(), nullptr, nullptr, TRUE,
+                CREATE_NO_WINDOW, nullptr, work.c_str(), &si, &pi);
+            CloseHandle(outW); // parent's copies: the child has its own now
+            CloseHandle(inR);
+            if (!launched)
+            {
+                CloseHandle(outR);
+                CloseHandle(inW);
+                wchar_t buf[128]{};
+                swprintf_s(buf, L"Could not start Java (error %lu).", GetLastError());
+                error = buf;
+                return false;
+            }
+            {
+                std::lock_guard<std::mutex> lk(Console::g_mutex);
+                Console::Proc p{};
+                p.hProcess = pi.hProcess;
+                p.hThread = pi.hThread;
+                p.hInW = inW;
+                p.hOutR = outR;
+                Console::g_procs[std::wstring{ id }] = p;
+            }
+            std::wstring key{ id };
+            HANDLE childProc = pi.hProcess;
+            std::thread([key, outR, childProc] {
+                Console::Pump(key, outR, childProc);
+            }).detach();
+            return true;
+        }
+        catch (...)
+        {
+            error = L"Could not start the server.";
+        }
+        return false;
+    }
+
+    void SendConsole(hstring const& id, std::wstring const& line)
+    {
+        try
+        {
+            std::lock_guard<std::mutex> lk(Console::g_mutex);
+            auto it = Console::g_procs.find(std::wstring{ id });
+            if (it == Console::g_procs.end() || it->second.closed || !it->second.hInW)
+                return;
+            std::string narrow(line.begin(), line.end());
+            narrow += "\n";
+            DWORD wrote = 0;
+            WriteFile(it->second.hInW, narrow.data(), static_cast<DWORD>(narrow.size()), &wrote, nullptr);
+        }
+        catch (...)
+        {
+        }
+    }
+
+    void StopConsole(hstring const& id)
+    {
+        HANDLE h = nullptr;
+        try
+        {
+            std::lock_guard<std::mutex> lk(Console::g_mutex);
+            auto it = Console::g_procs.find(std::wstring{ id });
+            if (it == Console::g_procs.end() || it->second.closed)
+                return;
+            const char stop[] = "stop\n";
+            DWORD wrote = 0;
+            if (it->second.hInW)
+                WriteFile(it->second.hInW, stop, 5, &wrote, nullptr);
+            h = it->second.hProcess;
+        }
+        catch (...)
+        {
+            return;
+        }
+        // Wait for the graceful shutdown off-thread; the reader reports the
+        // exit and releases the handles. Kill only a stuck process.
+        std::wstring key{ id };
+        std::thread([key, h] {
+            try
+            {
+                if (WaitForSingleObject(h, 10000) == WAIT_TIMEOUT)
+                {
+                    std::lock_guard<std::mutex> lk(Console::g_mutex);
+                    auto it = Console::g_procs.find(key);
+                    if (it != Console::g_procs.end() && !it->second.closed)
+                        TerminateProcess(it->second.hProcess, 1);
+                }
+            }
+            catch (...)
+            {
+            }
+        }).detach();
+    }
+
+    Windows::Foundation::IAsyncOperation<hstring> BackupServerAsync(
+        std::filesystem::path const& dir, hstring const& label)
+    {
+        hstring err = L"Backup failed.";
+        try
+        {
+            co_await winrt::resume_background();
+            std::wstring safe{ label };
+            for (auto& c : safe)
+            {
+                if (!(iswalnum(c) || c == L'-' || c == L'_'))
+                    c = L'_';
+            }
+            if (safe.empty())
+                safe = L"server";
+            SYSTEMTIME st{};
+            GetLocalTime(&st);
+            wchar_t stamp[32]{};
+            swprintf_s(stamp, L"%04d%02d%02d-%02d%02d%02d",
+                st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
+            auto destDir = dir / L"backups";
+            std::error_code ec;
+            std::filesystem::create_directories(destDir, ec);
+            auto dest = destDir / (safe + L"-" + stamp + L".tar.gz");
+            std::wstring cmd = L"tar -czf \"" + dest.wstring() + L"\" -C \"" +
+                dir.wstring() + L"\" --exclude=backups .";
+            STARTUPINFOW si{ sizeof(si) };
+            si.dwFlags = STARTF_USESHOWWINDOW;
+            si.wShowWindow = SW_HIDE;
+            PROCESS_INFORMATION pi{};
+            std::wstring mutableCmd = cmd;
+            if (!CreateProcessW(nullptr, mutableCmd.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW,
+                    nullptr, nullptr, &si, &pi))
+                co_return err;
+            WaitForSingleObject(pi.hProcess, INFINITE);
+            DWORD code = 1;
+            GetExitCodeProcess(pi.hProcess, &code);
+            CloseHandle(pi.hProcess);
+            CloseHandle(pi.hThread);
+            if (code == 0)
+                co_return hstring{};
+        }
+        catch (...)
+        {
+        }
+        co_return err;
+    }
+
+    Windows::Foundation::IAsyncOperation<hstring> RestoreBackupAsync(
+        std::filesystem::path const& dir, std::filesystem::path const& backup)
+    {
+        hstring err = L"Restore failed.";
+        try
+        {
+            co_await winrt::resume_background();
+            std::wstring cmd = L"tar -xzf \"" + backup.wstring() + L"\" -C \"" + dir.wstring() + L"\"";
+            STARTUPINFOW si{ sizeof(si) };
+            si.dwFlags = STARTF_USESHOWWINDOW;
+            si.wShowWindow = SW_HIDE;
+            PROCESS_INFORMATION pi{};
+            std::wstring mutableCmd = cmd;
+            if (!CreateProcessW(nullptr, mutableCmd.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW,
+                    nullptr, nullptr, &si, &pi))
+                co_return err;
+            WaitForSingleObject(pi.hProcess, INFINITE);
+            DWORD code = 1;
+            GetExitCodeProcess(pi.hProcess, &code);
+            CloseHandle(pi.hProcess);
+            CloseHandle(pi.hThread);
+            if (code == 0)
+                co_return hstring{};
+        }
+        catch (...)
+        {
+        }
+        co_return err;
     }
 
     int RequiredJava(hstring const& mcVersion)

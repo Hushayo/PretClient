@@ -60,6 +60,20 @@ namespace winrt::PretClient::Server
     };
     std::vector<ServerEntry> LoadServers();
     void SaveServers(std::vector<ServerEntry> const& servers);
+    // First launchable jar in a server folder (server.jar, spigot-*.jar,
+    // minecraft_server*.jar, ...). Skips installers/BuildTools. Empty if none.
+    std::filesystem::path FindServerJar(std::filesystem::path const& dir);
+
+    // In-app server consoles, keyed by server id. Output is pumped on a
+    // background thread into the sink; the UI marshals it to the page.
+    using ConsoleLineFn = std::function<void(hstring id, std::string line, bool exited, int exitCode)>;
+    void SetConsoleSink(ConsoleLineFn fn);
+    bool ConsoleRunning(hstring const& id);
+    void* ConsoleHandle(hstring const& id); // process HANDLE for stats, null when stopped
+    bool StartConsole(hstring const& id, std::filesystem::path const& dir,
+        std::filesystem::path const& jar, hstring const& javaExe, int maxMemMb, hstring& error);
+    void SendConsole(hstring const& id, std::wstring const& line);
+    void StopConsole(hstring const& id); // graceful "stop", kill fallback
 
     // Runs "java -jar <jar> <args>" hidden in workDir, waiting on a
     // background thread. Returns the process exit code (-1 on failure).
@@ -67,4 +81,11 @@ namespace winrt::PretClient::Server
         hstring javaExe, hstring jarPath, hstring args, hstring workDir);
     // Minimum Java major for a server on this MC version.
     int RequiredJava(hstring const& mcVersion);
+    // Creates backups/<label>-<timestamp>.tar.gz of the server folder.
+    // Restore extracts a backup over the folder (server must be stopped).
+    // Both run the wait off-thread; "" = success, else error text.
+    Windows::Foundation::IAsyncOperation<hstring> BackupServerAsync(
+        std::filesystem::path const& dir, hstring const& label);
+    Windows::Foundation::IAsyncOperation<hstring> RestoreBackupAsync(
+        std::filesystem::path const& dir, std::filesystem::path const& backup);
 }

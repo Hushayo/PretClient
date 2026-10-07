@@ -25,4 +25,8 @@ namespace winrt::PretClient
     // <gameDir>/instances/<id>/mods -- mods owned by one instance; staged
     // into <gameDir>/mods right before launch so the mod loader sees them.
     std::filesystem::path InstanceModsDir(Settings const& s, hstring const& instanceId);
+    // <gameDir>/instances/<id>/resourcepacks -- packs owned by one instance;
+    // staged into <gameDir>/resourcepacks right before launch so the game
+    // sees them (works for vanilla + all loaders).
+    std::filesystem::path InstanceResourcePacksDir(Settings const& s, hstring const& instanceId);
 }

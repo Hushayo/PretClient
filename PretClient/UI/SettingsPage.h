@@ -23,9 +23,10 @@ namespace winrt::PretClient
         void SignIn();
 
         Microsoft::UI::Xaml::Controls::StackPanel m_root{};
+        Microsoft::UI::Xaml::Controls::ScrollViewer m_scroll{};
+        Microsoft::UI::Xaml::Controls::StackPanel m_inner{};
         Microsoft::UI::Xaml::Controls::TextBox m_username{};
         Microsoft::UI::Xaml::Controls::TextBlock m_account{};
-        Microsoft::UI::Xaml::Controls::TextBox m_clientId{};
         Microsoft::UI::Xaml::Controls::Button m_signIn{};
         Microsoft::UI::Xaml::Controls::Button m_signOut{};
         Microsoft::UI::Xaml::Controls::TextBox m_gameDir{};
