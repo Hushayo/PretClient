@@ -1,0 +1,80 @@
+name: Auto Tag Release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '**.cpp'
+      - '**.h'
+      - '**.hpp'
+      - '**.rc'
+      - '*.sln'
+      - 'VERSION'
+
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read current version
+        id: version
+        shell: bash
+        run: |
+          VERSION=$(cat VERSION)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Check if tag exists
+        id: tagcheck
+        shell: bash
+        run: |
+          if git rev-parse "v${{ steps.version.outputs.version }}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Bump patch version if needed
+        if: steps.tagcheck.outputs.exists == 'true'
+        id: bump
+        shell: bash
+        run: |
+          VERSION=$(cat VERSION)
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
+          NEW_PATCH=$((PATCH + 1))
+          NEW_VERSION="${MAJOR}.${MINOR}.${NEW_PATCH}"
+          echo "$NEW_VERSION" > VERSION
+          echo "new_version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Configure git
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Commit version bump
+        if: steps.tagcheck.outputs.exists == 'true'
+        shell: bash
+        run: |
+          git add VERSION
+          git commit -m "Bump version to ${{ steps.bump.outputs.new_version }}" || echo "No version bump needed"
+          git push
+
+      - name: Create tag
+        shell: bash
+        run: |
+          VERSION=$(cat VERSION)
+          TAG="v${VERSION}"
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Tag already exists: $TAG"
+          else
+            git tag "$TAG"
+            git push origin "$TAG"
+          fi
