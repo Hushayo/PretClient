@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>PretClient — Compact Minecraft Launcher for Windows</title>
-  <meta name="description" content="PretClient is a compact, offline-first Minecraft launcher for Windows. Vanilla and Fabric instances, Modrinth mods, live CPU/RAM/GPU stats and one-click updates. No admin, no account." />
+  <meta name="description" content="PretClient is a compact, offline-first Minecraft launcher for Windows. Vanilla, Fabric, Quilt, Forge and NeoForge instances, Modrinth mods, per-process stats + game log while running and one-click updates. No admin, no account." />
   <meta name="color-scheme" content="light dark" />
   <meta name="theme-color" content="#14191b" />
   <link rel="stylesheet" href="./styles.css" />
@@ -52,8 +52,8 @@
         <div class="hero-text">
           <h1>A compact Minecraft launcher for Windows.</h1>
           <p class="sub">
-            No MSIX, no admin rights, no account. Create Vanilla or Fabric instances,
-            add Modrinth mods to each one, and watch CPU, RAM, GPU and the game log live while you play.
+            No MSIX, no admin rights, no account. Create Vanilla, Fabric, Quilt, Forge or NeoForge instances,
+            add Modrinth mods to each one, and see per-process CPU/RAM plus the game log live on the card while it runs.
           </p>
           <div class="cta">
             <a id="download-btn" class="btn primary" data-dl href="https://github.com/Hushayo/PretClient/releases/download/v2.0.12/PretClient-Setup.exe">Download for Windows x64</a>
@@ -68,38 +68,43 @@
         </div>
 
         <figure class="hero-art">
-          <div class="app" role="img" aria-label="Illustration of the PretClient launcher: an instance list, a Play button, live CPU, RAM and GPU meters, and a game log.">
+          <div class="app" role="img" aria-label="Illustration of the real PretClient Instances page: instance cards with loader badge, status pill, a stats line and game log that appear only while running.">
             <div class="app-bar">
-              <span class="app-title"><svg class="logo sm" aria-hidden="true"><use href="#logo"/></svg>PretClient</span>
+              <span class="app-title"><svg class="logo sm" aria-hidden="true"><use href="#logo"/></svg>PretClient — Instances</span>
               <span class="app-ctl" aria-hidden="true"><i></i><i></i><i></i></span>
             </div>
-            <div class="app-body" aria-hidden="true">
-              <div class="app-side">
-                <div class="inst on"><span class="blk grass"></span><span><b>Survival</b><small>Fabric</small></span></div>
-                <div class="inst"><span class="blk stone"></span><span><b>Creative test</b><small>Vanilla</small></span></div>
-                <div class="inst"><span class="blk ore"></span><span><b>Redstone lab</b><small>Vanilla</small></span></div>
-                <div class="inst add">+ New instance</div>
+            <div class="app-list" aria-hidden="true">
+              <div class="app-top">
+                <span class="mini-btn solid">+ New instance</span>
+                <span class="mini-btn">Profile: Steve</span>
               </div>
-              <div class="app-main">
-                <div class="app-head">
-                  <div><h3>Survival</h3><p>Fabric, 14 mods, playing as Steve</p></div>
-                  <span class="play">Play</span>
+              <div class="mcard live">
+                <div class="mcard-head">
+                  <span class="tile">S</span>
+                  <span class="mid"><b>Survival</b><small><em>FABRIC</em> MC 1.21.4</small></span>
+                  <span class="pill run">● Running</span>
                 </div>
-                <div class="meters">
-                  <div class="meter"><span>CPU</span><div class="bar"><i data-m="cpu" style="--v:34%"></i></div><b data-v="cpu">34%</b></div>
-                  <div class="meter"><span>RAM</span><div class="bar"><i data-m="ram" style="--v:58%"></i></div><b data-v="ram">58%</b></div>
-                  <div class="meter"><span>GPU</span><div class="bar"><i data-m="gpu" style="--v:41%"></i></div><b data-v="gpu">41%</b></div>
-                </div>
-                <div class="log" id="mock-log">
+                <p class="mstats">pid 1234 | CPU 12.3% | RAM 1.2 GB | GPU 15.0%</p>
+                <div class="log">
                   <p><span class="t">[12:04:09]</span> Setting user: Steve</p>
                   <p><span class="t">[12:04:10]</span> Loading 14 mods</p>
                   <p><span class="t">[12:04:13]</span> Reloading ResourceManager</p>
                   <p><span class="t">[12:04:15]</span> <span class="ok">Sound engine started</span></p>
                 </div>
+                <div class="mbtns"><span class="play off">Play</span><span class="mbtn solid">Stop</span><span class="mbtn">Restart</span><span class="mbtn">Mods</span></div>
+              </div>
+              <div class="mcard">
+                <div class="mcard-head">
+                  <span class="tile vanilla">C</span>
+                  <span class="mid"><b>Creative test</b><small><em class="van">VANILLA</em> MC 1.21.4</small></span>
+                  <span class="pill">● Idle</span>
+                </div>
+                <p class="mstats idle">Ready to play</p>
+                <div class="mbtns"><span class="play">Play</span><span class="mbtn">Delete</span></div>
               </div>
             </div>
           </div>
-          <figcaption>Interface sketch. The numbers are for show.</figcaption>
+          <figcaption>Sketch of the real Instances cards. Stats + log show only while running. Values are samples.</figcaption>
         </figure>
       </div>
     </section>
@@ -113,9 +118,9 @@
         <div class="bento">
           <article class="cell w4">
             <h3>Instances</h3>
-            <p>Vanilla or Fabric, each in its own isolated folder. Play offline with a username profile, and keep live CPU, RAM and GPU numbers next to the game log for every instance.</p>
+            <p>Vanilla, Fabric, Quilt, Forge or NeoForge, each in its own isolated folder. Play offline with a username profile. While an instance runs, its card shows per-process CPU, private RAM, system GPU and the live game log tail — idle cards just say Ready to play.</p>
             <ul class="chips">
-              <li>Vanilla</li><li>Fabric</li><li>Isolated folders</li><li>Offline profiles</li><li>Live stats</li><li>Game log</li>
+              <li>Vanilla</li><li>Fabric</li><li>Quilt</li><li>Forge</li><li>NeoForge</li><li>Isolated folders</li><li>Offline profiles</li><li>Stats while running</li><li>Game log</li>
             </ul>
           </article>
 
@@ -215,7 +220,7 @@ winget install --manifest .\PretClient\winget\manifests\h\hushayo\pretclient\<sp
           <ol class="steps">
             <li><strong>Download</strong><span>Grab the setup exe from the button above.</span></li>
             <li><strong>Run it</strong><span>No admin needed. Install, then launch.</span></li>
-            <li><strong>Play</strong><span>Set a username, create a Vanilla or Fabric instance and hit Play.</span></li>
+            <li><strong>Play</strong><span>Set a username, create a Vanilla, Fabric, Quilt, Forge or NeoForge instance and hit Play.</span></li>
           </ol>
         </div>
       </div>

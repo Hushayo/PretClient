@@ -2,28 +2,59 @@
 (() => {
   const REPO = "Hushayo/PretClient";
 
-  document.querySelectorAll(".tab").forEach((t) => {
-    t.addEventListener("click", () => {
-      document.querySelectorAll(".tab").forEach((x) => x.classList.remove("active"));
-      t.classList.add("active");
-      document.getElementById("term-direct").classList.toggle("hidden", t.dataset.tab !== "direct");
-      document.getElementById("term-winget").classList.toggle("hidden", t.dataset.tab !== "winget");
-    });
-  });
+  const tabs = [...document.querySelectorAll(".tab")];
+  const selectTab = (t) => {
+    for (const x of tabs) {
+      const on = x === t;
+      x.classList.toggle("active", on);
+      x.setAttribute("aria-selected", on ? "true" : "false");
+      if (on) x.removeAttribute("tabindex");
+      else x.setAttribute("tabindex", "-1");
+      const panel = x.getAttribute("aria-controls")
+        ? document.getElementById(x.getAttribute("aria-controls"))
+        : null;
+      if (panel) panel.hidden = !on;
+    }
+  };
+  tabs.forEach((t) => t.addEventListener("click", () => selectTab(t)));
+
+  const flash = (btn, idle) => {
+    btn.textContent = "Copied";
+    btn.classList.add("done");
+    setTimeout(() => {
+      btn.textContent = idle;
+      btn.classList.remove("done");
+    }, 1200);
+  };
 
   const copyBtn = document.getElementById("copy-btn");
   if (copyBtn) {
     copyBtn.addEventListener("click", async () => {
-      const active = document.querySelector(".tab.active")?.dataset.tab === "winget"
-        ? document.getElementById("term-winget")
-        : document.getElementById("term-direct");
+      const activeTab = document.querySelector(".tab.active");
+      const panelId = activeTab?.getAttribute("aria-controls") || "term-direct";
+      const active = document.getElementById(panelId);
+      if (!active) return;
       try {
         await navigator.clipboard.writeText(active.innerText);
-        copyBtn.textContent = "Copied";
-        setTimeout(() => (copyBtn.textContent = "Copy"), 1200);
+        flash(copyBtn, "Copy");
       } catch { /* clipboard unavailable */ }
     });
   }
+
+  // Generic [data-copy] buttons (e.g. the winget "Test locally" snippet).
+  document.querySelectorAll("[data-copy]").forEach((btn) => {
+    if (btn.id === "copy-btn" || btn.id === "hash-btn") return;
+    const idle = btn.textContent;
+    btn.addEventListener("click", async () => {
+      const sel = btn.getAttribute("data-copy");
+      const el = sel ? document.querySelector(sel) : null;
+      if (!el) return;
+      try {
+        await navigator.clipboard.writeText(el.innerText.trim());
+        flash(btn, idle);
+      } catch { /* noop */ }
+    });
+  });
 
   const hashBtn = document.getElementById("hash-btn");
   if (hashBtn) {
