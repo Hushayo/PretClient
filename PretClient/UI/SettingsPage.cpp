@@ -55,15 +55,17 @@ namespace winrt::PretClient
         m_root.Children().Append(accRow);
 
         m_clientId.Header(box_value(L"Azure client ID (Microsoft sign-in)"));
+        m_clientId.PlaceholderText(L"Leave empty for the built-in app");
         m_root.Children().Append(m_clientId);
 
         TextBlock accHint{};
         accHint.Opacity(0.6);
         accHint.TextWrapping(TextWrapping::Wrap);
         accHint.Style(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>());
-        accHint.Text(L"Register an app at portal.azure.com (consumers accounts, no secret) and paste "
-                     L"its client ID. New apps must also be approved for Minecraft Services "
-                     L"(aka.ms/mce-reviewappid) or sign-in stops at a 403. Leave empty to play offline.");
+        accHint.Text(L"Just press Sign in - PretClient uses the shared Minecraft app ID, no setup needed. "
+                     L"Optionally paste your own Azure client ID above (consumers accounts, no secret) to use "
+                     L"that instead; self-registered apps may need Minecraft Services approval "
+                     L"(aka.ms/mce-reviewappid).");
         m_root.Children().Append(accHint);
 
         m_gameDir.Header(box_value(L"Game folder (roaming .minecraft)"));
