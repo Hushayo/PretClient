@@ -184,6 +184,18 @@ namespace winrt::PretClient
         m_cards.Children().Clear();
         m_cardList.clear();
         auto instances = LoadInstances();
+        // One game at a time: instances share the game dir and the RAM
+        // budget, so a second launch is refused (PlayInstance) and its
+        // button is disabled here.
+        bool anyRunning = false;
+        for (auto const& i : instances)
+        {
+            if (Launcher::IsRunning(i.id))
+            {
+                anyRunning = true;
+                break;
+            }
+        }
         for (auto const& inst : instances)
         {
             bool running = Launcher::IsRunning(inst.id);
@@ -486,7 +498,7 @@ namespace winrt::PretClient
             play.Content(box_value(L"Play"));
             play.Style(Application::Current().Resources().Lookup(box_value(L"AccentButtonStyle")).as<Style>());
             play.MinWidth(88);
-            play.IsEnabled(!running && !preparing);
+            play.IsEnabled(!running && !preparing && !anyRunning);
             play.Click([this, id](IInspectable const&, RoutedEventArgs const&) { PlayInstance(id); });
 
             Button stop{};
@@ -2031,6 +2043,17 @@ namespace winrt::PretClient
         {
             SetStatus(L"Already preparing (download in progress).");
             co_return;
+        }
+        // Only one game process at a time: instances share the game dir and
+        // each reserves up to maxMem — two at once OOMs the machine.
+        for (auto const& i : LoadInstances())
+        {
+            if (i.id != id && Launcher::IsRunning(i.id))
+            {
+                hstring n = i.name.empty() ? i.id : i.name;
+                SetStatus(L"\"" + n + L"\" is already running - stop it first.");
+                co_return;
+            }
         }
         m_preparing.insert(std::wstring{ id });
         auto settings = LoadSettings();
