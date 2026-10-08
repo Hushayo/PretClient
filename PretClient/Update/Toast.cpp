@@ -1,6 +1,8 @@
 #include "pch.h"
 #include "Toast.h"
 #include <algorithm>
+#include <chrono>
+#include <thread>
 #include <winrt/Microsoft.Windows.AppNotifications.h>
 
 using namespace winrt;
@@ -41,7 +43,9 @@ namespace winrt::PretClient::Update::Toast
                 auto manager = AppNotificationManager::Default();
                 try
                 {
-                    manager.RemoveByTagAsync(kTag);
+                    // Block until the old toast is gone so the new Show() below
+                    // can't be deleted by a still-pending remove.
+                    manager.RemoveByTagAsync(kTag).get();
                 }
                 catch (...)
                 {
@@ -78,17 +82,29 @@ namespace winrt::PretClient::Update::Toast
 
         void PushProgress(hstring const& status, double value01, hstring const& valueText)
         {
-            try
+            // The toast XML intentionally contains the literal placeholders
+            // {progressValue}, {progressValueString}, {progressStatus} — the
+            // shell replaces them via UpdateAsync. Fire-and-forget UpdateAsync
+            // never completes (the IAsyncAction is destroyed on return), so the
+            // raw placeholders stay visible like in the bug report. Block with
+            // .get() and retry once: the first update can race the Show().
+            for (int attempt = 0; attempt < 2; ++attempt)
             {
-                AppNotificationProgressData data{ NextSeq() };
-                data.Title(L"");
-                data.Value((std::max)(0.0, (std::min)(1.0, value01)));
-                data.ValueStringOverride(valueText);
-                data.Status(status);
-                AppNotificationManager::Default().UpdateAsync(data, kTag, kGroup);
-            }
-            catch (...)
-            {
+                try
+                {
+                    AppNotificationProgressData data{ NextSeq() };
+                    data.Title(L"");
+                    data.Value((std::max)(0.0, (std::min)(1.0, value01)));
+                    data.ValueStringOverride(valueText);
+                    data.Status(status);
+                    AppNotificationManager::Default().UpdateAsync(data, kTag, kGroup).get();
+                    return;
+                }
+                catch (...)
+                {
+                    if (attempt == 0)
+                        std::this_thread::sleep_for(std::chrono::milliseconds(150));
+                }
             }
         }
 
@@ -232,7 +248,7 @@ namespace winrt::PretClient::Update::Toast
     {
         try
         {
-            AppNotificationManager::Default().RemoveByTagAsync(kTag);
+            AppNotificationManager::Default().RemoveByTagAsync(kTag).get();
         }
         catch (...)
         {
