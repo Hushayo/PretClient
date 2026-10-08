@@ -37,6 +37,7 @@ namespace winrt::PretClient
         // Detail view (one server at a time).
         void OpenDetail(hstring id);
         void ShowList();
+        winrt::fire_and_forget DeleteServer(hstring id);
         void BuildDetail();
         void UpdateDetailStatus();
         winrt::fire_and_forget StartServer(hstring id);

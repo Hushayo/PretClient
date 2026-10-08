@@ -341,6 +341,12 @@ namespace winrt::PretClient
                     }
                 });
                 btns.Children().Append(folder);
+                Button del{};
+                del.Content(box_value(L"Delete"));
+                del.Click([this, id = s.id](IInspectable const&, RoutedEventArgs const&) {
+                    DeleteServer(id);
+                });
+                btns.Children().Append(del);
                 col.Children().Append(btns);
 
                 card.Child(col);
@@ -898,6 +904,57 @@ namespace winrt::PretClient
         }
     } // namespace
 
+    fire_and_forget LocalServerPage::DeleteServer(hstring id)
+    {
+        try
+        {
+            auto entry = FindEntry(id);
+            if (entry.id.empty())
+                co_return;
+            hstring shown = entry.name.empty() ? entry.id : entry.name;
+            ContentDialog confirm{};
+            confirm.Title(box_value(L"Delete server?"));
+            confirm.Content(box_value(
+                L"Delete \"" + shown + L"\" and all its files? This cannot be undone."));
+            confirm.PrimaryButtonText(L"Delete");
+            confirm.CloseButtonText(L"Cancel");
+            confirm.DefaultButton(ContentDialogButton::Close);
+            try
+            {
+                confirm.XamlRoot(m_root.XamlRoot());
+            }
+            catch (...)
+            {
+            }
+            if (co_await confirm.ShowAsync() != ContentDialogResult::Primary)
+                co_return;
+            try
+            {
+                Server::StopConsole(id);
+            }
+            catch (...)
+            {
+            }
+            auto dir = Server::ServersDir() / std::wstring{ id };
+            std::error_code ec;
+            std::filesystem::remove_all(dir, ec);
+            auto all = Server::LoadServers();
+            all.erase(std::remove_if(all.begin(), all.end(),
+                          [&](Server::ServerEntry const& e) { return e.id == id; }),
+                all.end());
+            Server::SaveServers(all);
+            if (id == m_detailId)
+                ShowList();
+            else
+                RefreshServers();
+            SetStatus(ec ? L"Server deleted (some files could not be removed)."
+                         : L"Server deleted.");
+        }
+        catch (...)
+        {
+        }
+    }
+
     void LocalServerPage::ShowList()
     {
         StopDetailSampler();
@@ -1006,6 +1063,12 @@ namespace winrt::PretClient
                 }
             });
             btns.Children().Append(folder);
+            Button del{};
+            del.Content(box_value(L"Delete"));
+            del.Click([this](IInspectable const&, RoutedEventArgs const&) {
+                DeleteServer(m_detailId);
+            });
+            btns.Children().Append(del);
             headCol.Children().Append(btns);
             headCard.Child(headCol);
             m_detail.Children().Append(headCard);
