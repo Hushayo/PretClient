@@ -407,6 +407,361 @@ namespace winrt::PretClient::Downloader
             }
             return found;
         }
+        // Offline launch cache: the vanilla version JSON is saved on every
+        // successful online prepare to versions/<id>/<id>.json, and
+        // fabric/quilt loader profiles to
+        // versions/<mc>/pretclient-<loader>-<loaderVer>.json. Forge/NeoForge
+        // already cache via their installer (versions/<id>/<id>.json), so no
+        // extra file is needed for them. With these on disk, PrepareAsync can
+        // build a launchable PreparedGame with zero network traffic.
+        std::filesystem::path VanillaJsonPath(
+            std::filesystem::path const& gamePath, hstring const& vanillaId)
+        {
+            return gamePath / L"versions" /
+                std::filesystem::path{ std::wstring{ vanillaId } } /
+                (std::wstring{ vanillaId } + L".json");
+        }
+
+        std::wstring SanitizeFilePart(std::wstring s)
+        {
+            for (auto& c : s)
+            {
+                bool ok = (c >= L'0' && c <= L'9') || (c >= L'A' && c <= L'Z') ||
+                    (c >= L'a' && c <= L'z') || c == L'-' || c == L'_' || c == L'.';
+                if (!ok)
+                    c = L'_';
+            }
+            if (s.empty())
+                s = L"cached";
+            return s;
+        }
+
+        std::filesystem::path LoaderCachePath(
+            std::filesystem::path const& gamePath, hstring const& mcVersion,
+            hstring const& loader, hstring const& loaderVersion)
+        {
+            std::wstring name = L"pretclient-" + std::wstring{ loader } + L"-" +
+                SanitizeFilePart(std::wstring{ loaderVersion }) + L".json";
+            return gamePath / L"versions" /
+                std::filesystem::path{ std::wstring{ mcVersion } } / name;
+        }
+
+        bool WriteTextFile(std::filesystem::path const& p, hstring const& text)
+        {
+            try
+            {
+                std::error_code ec;
+                std::filesystem::create_directories(p.parent_path(), ec);
+                std::ofstream f(p, std::ios::binary | std::ios::trunc);
+                if (!f.good())
+                    return false;
+                auto utf8 = to_string(text);
+                f.write(utf8.data(), static_cast<std::streamsize>(utf8.size()));
+                return static_cast<bool>(f);
+            }
+            catch (...)
+            {
+                return false;
+            }
+        }
+
+        // Any cached fabric/quilt profile for this MC, newest filename first.
+        std::vector<std::filesystem::path> FindCachedLoaderFiles(
+            std::filesystem::path const& gamePath, hstring const& mcVersion,
+            hstring const& loader)
+        {
+            std::vector<std::filesystem::path> out;
+            try
+            {
+                auto dir = gamePath / L"versions" /
+                    std::filesystem::path{ std::wstring{ mcVersion } };
+                std::error_code ec;
+                if (!std::filesystem::exists(dir, ec))
+                    return out;
+                std::wstring prefix = L"pretclient-" + std::wstring{ loader } + L"-";
+                for (auto const& e : std::filesystem::directory_iterator(dir, ec))
+                {
+                    try
+                    {
+                        if (!e.is_regular_file(ec))
+                            continue;
+                        auto fn = e.path().filename().wstring();
+                        if (fn.rfind(prefix, 0) != 0)
+                            continue;
+                        if (fn.size() < 6 ||
+                            fn.compare(fn.size() - 5, 5, L".json") != 0)
+                            continue;
+                        // Must parse as JSON with a loader entry point.
+                        if (!HasLoaderMain(ReadProfileFile(e.path())))
+                            continue;
+                        out.push_back(e.path());
+                    }
+                    catch (...)
+                    {
+                    }
+                }
+                std::sort(out.begin(), out.end(), [](auto const& a, auto const& b) {
+                    return a.wstring() > b.wstring();
+                });
+            }
+            catch (...)
+            {
+            }
+            return out;
+        }
+
+        hstring LoaderVersionFromCacheFile(std::filesystem::path const& p, hstring const& loader)
+        {
+            try
+            {
+                std::wstring fn = p.filename().wstring();
+                std::wstring prefix = L"pretclient-" + std::wstring{ loader } + L"-";
+                if (fn.rfind(prefix, 0) != 0)
+                    return L"cached";
+                auto ver = fn.substr(prefix.size());
+                if (ver.size() >= 5 && ver.compare(ver.size() - 5, 5, L".json") == 0)
+                    ver.erase(ver.size() - 5);
+                if (ver.empty())
+                    return L"cached";
+                return hstring{ ver };
+            }
+            catch (...)
+            {
+                return hstring{ L"cached" };
+            }
+        }
+
+        // Offline assembly: versionJson (+ loaderProfile when modded) are
+        // already loaded from disk. Verifies the client jar + every library
+        // the launch classpath needs, re-extracts natives, and fills the
+        // PreparedGame. Returns "" on success, otherwise a user-facing reason
+        // (first missing file) so Play can tell the user to go online once.
+        hstring BuildOfflineGame(PreparedGame& game,
+            std::filesystem::path const& gamePath, std::filesystem::path const& libsDir,
+            std::filesystem::path const& versionsDir, LogFn const& log)
+        {
+            try
+            {
+                if (!game.versionJson)
+                    return L"Cached version data is missing. Connect once to download it.";
+                try
+                {
+                    if (game.versionJson.HasKey(L"javaVersion"))
+                        game.javaMajor = static_cast<int>(
+                            game.versionJson.GetNamedObject(L"javaVersion")
+                                .GetNamedNumber(L"majorVersion"));
+                }
+                catch (...)
+                {
+                }
+                if (game.javaMajor < 8)
+                    game.javaMajor = 8;
+                try
+                {
+                    game.assetIndexId = OptStr(
+                        game.versionJson.GetNamedObject(L"assetIndex"), L"id");
+                }
+                catch (...)
+                {
+                }
+                game.gameDir = hstring{ gamePath.wstring() };
+                game.assetsDir = hstring{ (gamePath / L"assets").wstring() };
+                game.nativesDir = hstring{ (versionsDir / L"natives").wstring() };
+                game.clientJar = hstring{
+                    (versionsDir / (std::wstring{ game.vanillaId } + L".jar")).wstring()
+                };
+                std::error_code ec;
+                std::filesystem::create_directories(versionsDir, ec);
+                std::filesystem::remove_all(
+                    std::filesystem::path{ std::wstring{ game.nativesDir } }, ec);
+                std::filesystem::create_directories(
+                    std::filesystem::path{ std::wstring{ game.nativesDir } }, ec);
+
+                std::filesystem::path clientPath{ std::wstring{ game.clientJar } };
+                if (!std::filesystem::exists(clientPath, ec))
+                    return hstring{ L"Client jar is not cached for " } +
+                        game.vanillaId +
+                        hstring{ L". Connect once to download it." };
+
+                // Collect vanilla natives + verify every classpath artifact.
+                std::vector<std::filesystem::path> nativeZips;
+                if (game.versionJson.HasKey(L"libraries"))
+                {
+                    for (auto const& lv : game.versionJson.GetNamedArray(L"libraries"))
+                    {
+                        if (lv.ValueType() != JsonValueType::Object)
+                            continue;
+                        auto lib = lv.GetObject();
+                        if (!Rules::EntryAllowed(lib) || !lib.HasKey(L"downloads"))
+                            continue;
+                        hstring libName = OptStr(lib, L"name");
+                        auto dl = lib.GetNamedObject(L"downloads");
+                        if (dl.HasKey(L"artifact"))
+                        {
+                            try
+                            {
+                                auto art = dl.GetNamedObject(L"artifact");
+                                hstring rel = OptStr(art, L"path");
+                                if (rel.empty())
+                                    continue;
+                                auto dest = libsDir /
+                                    std::filesystem::path{ std::wstring{ rel } };
+                                if (!std::filesystem::exists(dest, ec))
+                                    return hstring{ L"Missing library " } +
+                                        (libName.empty() ? rel : libName) +
+                                        hstring{ L". Connect once to download it." };
+                                if (IsNativesEntry(std::wstring{ libName }))
+                                    nativeZips.push_back(dest);
+                            }
+                            catch (...)
+                            {
+                            }
+                        }
+                        if (dl.HasKey(L"classifiers"))
+                        {
+                            try
+                            {
+                                auto cls = dl.GetNamedObject(L"classifiers");
+                                hstring key = L"natives-windows";
+                                if (lib.HasKey(L"natives"))
+                                {
+                                    try
+                                    {
+                                        auto natives = lib.GetNamedObject(L"natives");
+                                        if (natives.HasKey(L"windows"))
+                                            key = natives.GetNamedString(L"windows");
+                                    }
+                                    catch (...)
+                                    {
+                                    }
+                                }
+                                if (cls.HasKey(key))
+                                {
+                                    auto art = cls.GetNamedObject(key);
+                                    hstring rel = OptStr(art, L"path");
+                                    auto dest = libsDir /
+                                        std::filesystem::path{ std::wstring{
+                                            rel.empty() ? L"natives-legacy.jar" : rel } };
+                                    if (!std::filesystem::exists(dest, ec))
+                                        return L"Missing natives library. Connect once to download it.";
+                                    nativeZips.push_back(dest);
+                                }
+                            }
+                            catch (...)
+                            {
+                            }
+                        }
+                    }
+                }
+                // Loader libraries become extraClasspath (same resolution as
+                // the online path: vanilla-style artifact or maven coords).
+                if (game.loaderProfile && game.loaderProfile.HasKey(L"libraries"))
+                {
+                    try
+                    {
+                        for (auto const& lv :
+                            game.loaderProfile.GetNamedArray(L"libraries"))
+                        {
+                            if (lv.ValueType() != JsonValueType::Object)
+                                continue;
+                            auto lib = lv.GetObject();
+                            if (!Rules::EntryAllowed(lib))
+                                continue;
+                            hstring name = OptStr(lib, L"name");
+                            hstring base = OptStr(lib, L"url");
+                            hstring rel;
+                            bool have = false;
+                            try
+                            {
+                                if (lib.HasKey(L"downloads"))
+                                {
+                                    auto dl = lib.GetNamedObject(L"downloads");
+                                    if (dl.HasKey(L"artifact"))
+                                    {
+                                        auto art = dl.GetNamedObject(L"artifact");
+                                        rel = OptStr(art, L"path");
+                                        have = !rel.empty();
+                                    }
+                                }
+                            }
+                            catch (...)
+                            {
+                                have = false;
+                            }
+                            if (!have && !name.empty() && !base.empty())
+                            {
+                                hstring mrel = Fabric::MavenJarPath(name);
+                                if (mrel.empty())
+                                    continue;
+                                rel = mrel;
+                                have = true;
+                            }
+                            if (!have)
+                                continue;
+                            auto dest = libsDir /
+                                std::filesystem::path{ std::wstring{ rel } };
+                            if (!std::filesystem::exists(dest, ec))
+                                return hstring{ L"Missing loader library " } +
+                                    (name.empty() ? rel : name) +
+                                    hstring{ L". Connect once to download it." };
+                            game.extraClasspath.push_back(hstring{ dest.wstring() });
+                        }
+                    }
+                    catch (...)
+                    {
+                    }
+                }
+                for (auto const& zip : nativeZips)
+                {
+                    if (!Http::UnzipWithTar(zip,
+                            std::filesystem::path{ std::wstring{ game.nativesDir } }))
+                        return L"Natives extract failed.";
+                }
+                // Asset index: warn-only. The game still starts with missing
+                // objects (silent sounds / pink textures), which beats
+                // refusing to launch at all on a plane with no wifi.
+                try
+                {
+                    if (!game.assetIndexId.empty())
+                    {
+                        auto idx = gamePath / L"assets" / L"indexes" /
+                            (std::wstring{ game.assetIndexId } + L".json");
+                        if (!std::filesystem::exists(idx, ec) && log)
+                            log(L"Offline: asset index is not cached (game may miss sounds).");
+                    }
+                }
+                catch (...)
+                {
+                }
+                // Logging config: optional. Launch without it when uncached.
+                game.loggingPath = L"";
+                try
+                {
+                    if (game.versionJson.HasKey(L"logging"))
+                    {
+                        auto file = game.versionJson.GetNamedObject(L"logging")
+                            .GetNamedObject(L"client")
+                            .GetNamedObject(L"file");
+                        hstring id = OptStr(file, L"id");
+                        if (!id.empty())
+                        {
+                            auto dest = versionsDir /
+                                std::filesystem::path{ std::wstring{ id } };
+                            if (std::filesystem::exists(dest, ec))
+                                game.loggingPath = hstring{ dest.wstring() };
+                        }
+                    }
+                }
+                catch (...)
+                {
+                }
+                return hstring{};
+            }
+            catch (...)
+            {
+                return L"Offline launch failed (cached files unreadable).";
+            }
+        }
     } // namespace
 
     fire_and_forget PrepareAsync(
@@ -428,6 +783,7 @@ namespace winrt::PretClient::Downloader
                 : isQuilt              ? hstring{ L"Quilt" }
                                        : hstring{ L"Fabric" };
             hstring useLoader = loaderVersion;
+            std::filesystem::path gamePathEarly{ gameDir };
             if (isModded && useLoader.empty())
             {
                 log(hstring{ L"Resolving " } + loader + hstring{ L" loader..." });
@@ -447,11 +803,46 @@ namespace winrt::PretClient::Downloader
                 }
                 if (useLoader.empty())
                 {
-                    fail(hstring{ L"No " } + loader + hstring{ L" loader for " } +
-                        mcVersion + hstring{ L"." });
-                    co_return;
+                    // Offline: reuse whatever loader is already cached so a
+                    // previous online run can still launch with no internet.
+                    bool haveCached = false;
+                    try
+                    {
+                        if (isFabric || isQuilt)
+                        {
+                            auto cached = FindCachedLoaderFiles(gamePathEarly, mcVersion, loader);
+                            if (!cached.empty())
+                            {
+                                useLoader = LoaderVersionFromCacheFile(cached.front(), loader);
+                                haveCached = true;
+                            }
+                        }
+                        else
+                        {
+                            auto prof = FindInstalledProfile(
+                                gamePathEarly / L"versions", mcVersion,
+                                isForge ? hstring{ L"forge" } : hstring{ L"neoforge" });
+                            haveCached = HasLoaderMain(prof);
+                            if (haveCached)
+                                useLoader = L"cached";
+                        }
+                    }
+                    catch (...)
+                    {
+                    }
+                    if (!haveCached)
+                    {
+                        fail(hstring{ L"No " } + loader + hstring{ L" loader for " } +
+                            mcVersion +
+                            hstring{ L". Connect to the internet once to resolve it." });
+                        co_return;
+                    }
+                    log(kindName + hstring{ L" loader " } + useLoader + hstring{ L" (cached, offline)" });
                 }
-                log(kindName + hstring{ L" loader " } + useLoader);
+                else
+                {
+                    log(kindName + hstring{ L" loader " } + useLoader);
+                }
             }
             if (isFabric || isQuilt)
             {
@@ -468,10 +859,56 @@ namespace winrt::PretClient::Downloader
                 {
                 }
                 game.loaderProfile = prof;
+                if (game.loaderProfile)
+                {
+                    // Cache for offline launches.
+                    try
+                    {
+                        if (!useLoader.empty() && useLoader != hstring{ L"cached" })
+                            WriteTextFile(
+                                LoaderCachePath(gamePathEarly, mcVersion, loader, useLoader),
+                                game.loaderProfile.Stringify());
+                    }
+                    catch (...)
+                    {
+                    }
+                }
                 if (!game.loaderProfile)
                 {
-                    fail(kindName + hstring{ L" profile fetch failed." });
-                    co_return;
+                    // Offline fallback: any cached profile for this MC+loader.
+                    try
+                    {
+                        JsonObject cached{ nullptr };
+                        if (!useLoader.empty() && useLoader != hstring{ L"cached" })
+                            cached = ReadProfileFile(
+                                LoaderCachePath(gamePathEarly, mcVersion, loader, useLoader));
+                        if (!HasLoaderMain(cached))
+                        {
+                            auto files = FindCachedLoaderFiles(gamePathEarly, mcVersion, loader);
+                            if (!files.empty())
+                            {
+                                cached = ReadProfileFile(files.front());
+                                try
+                                {
+                                    useLoader = LoaderVersionFromCacheFile(files.front(), loader);
+                                }
+                                catch (...)
+                                {
+                                }
+                            }
+                        }
+                        game.loaderProfile = cached;
+                    }
+                    catch (...)
+                    {
+                    }
+                    if (!HasLoaderMain(game.loaderProfile))
+                    {
+                        fail(kindName +
+                            hstring{ L" profile fetch failed. Connect once to download it, then you can play offline." });
+                        co_return;
+                    }
+                    log(kindName + hstring{ L" profile (cached, offline)" });
                 }
             }
 
@@ -490,6 +927,7 @@ namespace winrt::PretClient::Downloader
 
             Versions::McVersion entry{};
             entry.id = vanillaId;
+            bool versionFromCache = false;
             try
             {
                 Versions::Manifest manifest{};
@@ -530,42 +968,60 @@ namespace winrt::PretClient::Downloader
                 }
                 (void)haveManifest;
             }
-            catch (const std::exception& e)
-            {
-                fail(hstring{ L"Version manifest fetch failed: " } + DescribeException(e));
-                co_return;
-            }
             catch (...)
             {
-                fail(L"Version manifest fetch failed: unknown error");
-                co_return;
+                // Offline below: entry.url stays empty on purpose.
             }
-            if (entry.url.empty())
+            if (!entry.url.empty())
             {
-                fail(hstring{ L"Unknown Minecraft version " } + vanillaId);
-                co_return;
-            }
-
-            log(hstring{ L"Fetching " } + vanillaId + L" package...");
-            try
-            {
-                auto version = co_await Versions::FetchVersionJsonAsync(entry);
-                if (!version)
+                log(hstring{ L"Fetching " } + vanillaId + L" package...");
+                try
                 {
-                    fail(L"Version package fetch failed.");
+                    auto version = co_await Versions::FetchVersionJsonAsync(entry);
+                    if (version)
+                    {
+                        game.versionJson = version;
+                        try
+                        {
+                            WriteTextFile(
+                                VanillaJsonPath(gamePathEarly, vanillaId),
+                                game.versionJson.Stringify());
+                        }
+                        catch (...)
+                        {
+                        }
+                    }
+                }
+                catch (...)
+                {
+                }
+            }
+            if (!game.versionJson)
+            {
+                // Offline fallback: reuse the version JSON saved by the last
+                // online run. Without it there is nothing to launch from.
+                try
+                {
+                    game.versionJson = ReadProfileFile(
+                        VanillaJsonPath(gamePathEarly, vanillaId));
+                    if (!game.versionJson && vanillaId != mcVersion)
+                        game.versionJson = ReadProfileFile(
+                            VanillaJsonPath(gamePathEarly, mcVersion));
+                }
+                catch (...)
+                {
+                }
+                if (!game.versionJson)
+                {
+                    if (entry.url.empty())
+                        fail(hstring{ L"No internet connection and " } + vanillaId +
+                            hstring{ L" was never downloaded. Connect once to download it, then you can play offline." });
+                    else
+                        fail(L"Version package fetch failed. Check your connection and retry.");
                     co_return;
                 }
-                game.versionJson = version;
-            }
-            catch (const std::exception& e)
-            {
-                fail(hstring{ L"Version package fetch failed: " } + DescribeException(e));
-                co_return;
-            }
-            catch (...)
-            {
-                fail(L"Version package fetch failed: unknown error");
-                co_return;
+                versionFromCache = true;
+                log(hstring{ L"Offline: using cached " } + vanillaId);
             }
 
             try
@@ -582,6 +1038,63 @@ namespace winrt::PretClient::Downloader
             std::filesystem::path gamePath{ gameDir };
             std::filesystem::path versionsDir = gamePath / L"versions" / std::filesystem::path{ std::wstring{ vanillaId } };
             std::filesystem::path libsDir = gamePath / L"libraries";
+
+            if (versionFromCache)
+            {
+                // No network from here on: assemble the launch from disk.
+                // Forge/NeoForge profiles live in versions/<id>/<id>.json
+                // (written by their installer), so resolve them the same way.
+                if (isForge || isNeoForge)
+                {
+                    hstring kindSub = isForge ? hstring{ L"forge" } : hstring{ L"neoforge" };
+                    hstring expectedId{};
+                    try
+                    {
+                        if (!useLoader.empty() && useLoader != hstring{ L"cached" })
+                            expectedId = isForge
+                                ? Forge::ExpectedVersionId(mcVersion, useLoader)
+                                : NeoForge::ExpectedVersionId(mcVersion, useLoader);
+                    }
+                    catch (...)
+                    {
+                    }
+                    JsonObject prof{ nullptr };
+                    try
+                    {
+                        if (!expectedId.empty())
+                        {
+                            auto cand = gamePath / L"versions" /
+                                std::filesystem::path{ std::wstring{ expectedId } } /
+                                (std::wstring{ expectedId } + L".json");
+                            prof = ReadProfileFile(cand);
+                        }
+                        if (!HasLoaderMain(prof))
+                            prof = FindInstalledProfile(
+                                gamePath / L"versions", mcVersion, kindSub);
+                    }
+                    catch (...)
+                    {
+                    }
+                    game.loaderProfile = prof;
+                    if (!HasLoaderMain(game.loaderProfile))
+                    {
+                        fail(kindName +
+                            hstring{ L" is not installed for " } + mcVersion +
+                            hstring{ L". Connect once to run the installer, then you can play offline." });
+                        co_return;
+                    }
+                    log(kindName + hstring{ L" profile (cached, offline)" });
+                }
+                if (auto offlineErr = BuildOfflineGame(game, gamePath, libsDir, versionsDir, log);
+                    !offlineErr.empty())
+                {
+                    fail(offlineErr);
+                    co_return;
+                }
+                log(L"Ready (offline).");
+                done(true, std::move(game), hstring{});
+                co_return;
+            }
             game.assetsDir = hstring{ (gamePath / L"assets").wstring() };
             game.gameDir = hstring{ gamePath.wstring() };
             game.nativesDir = hstring{ (versionsDir / L"natives").wstring() };
@@ -623,6 +1136,13 @@ namespace winrt::PretClient::Downloader
                 if (!HasLoaderMain(game.loaderProfile))
                 {
                     game.loaderProfile = JsonObject{ nullptr };
+                    if (useLoader == hstring{ L"cached" })
+                    {
+                        fail(kindName +
+                            hstring{ L" is not installed for " } + mcVersion +
+                            hstring{ L". Connect once to run the installer, then you can play offline." });
+                        co_return;
+                    }
                     if (installerUrl.empty() || expectedId.empty())
                     {
                         fail(kindName + hstring{ L" version not recognized for " } +

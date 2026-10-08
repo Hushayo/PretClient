@@ -8,6 +8,11 @@
 // modded instances the loader pieces:
 //   fabric/quilt: loader profile libraries (maven) + fabric-api (fabric only)
 //   forge/neoforge: installer run (--installClient) + installed profile libraries.
+//
+// Offline: the vanilla version JSON (versions/<id>/<id>.json) and
+// fabric/quilt profiles (versions/<mc>/pretclient-<loader>-<ver>.json) are
+// cached on every online run. A later launch with no internet reuses them
+// plus the already-downloaded jars/assets and skips every download.
 namespace winrt::PretClient::Downloader
 {
     using LogFn = std::function<void(hstring const&)>;

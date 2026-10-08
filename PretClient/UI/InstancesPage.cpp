@@ -2123,12 +2123,13 @@ namespace winrt::PretClient
             catch (...)
             {
             }
-            if (loaderVer.empty())
+            if (!loaderVer.empty())
             {
-                fail(hstring{ L"No " } + kind + hstring{ L" loader for " } + inst.mcVersion);
-                co_return;
+                inst.loaderVersion = loaderVer;
             }
-            inst.loaderVersion = loaderVer;
+            // When offline the lookup above stays empty on purpose: the
+            // downloader reuses the cached loader profile instead of failing
+            // here, so a previous online run can still launch with no net.
         }
 
         SetStatus(hstring{ L"Preparing " } + inst.mcVersion + L"... (first run downloads game files)");
