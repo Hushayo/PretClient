@@ -13,7 +13,6 @@ namespace winrt::PretClient::CurseForge
         constexpr wchar_t kApi[] = L"https://api.curseforge.com/v1";
         constexpr wchar_t kUA[] = L"PretClient/0.0.1 (github.com/Hushayo/PretClient)";
         constexpr int kGameMinecraft = 432;
-        constexpr int kClassMods = 6;
 
         // CurseForge modLoaderType enum: 0 = any (omit), 1 = Forge,
         // 4 = Fabric, 5 = Quilt, 6 = NeoForge.
@@ -228,13 +227,14 @@ namespace winrt::PretClient::CurseForge
     } // namespace
 
     fire_and_forget SearchAsync(
-        hstring query, hstring mcVersion, hstring loader, int offset, hstring apiKey, SearchFn done)
+        hstring query, hstring mcVersion, hstring loader, int offset, hstring apiKey, SearchFn done,
+        int classId)
     {
         SearchResult out{};
         try
         {
             std::wstring url = std::wstring{ kApi } + L"/mods/search?gameId=" +
-                std::to_wstring(kGameMinecraft) + L"&classId=" + std::to_wstring(kClassMods);
+                std::to_wstring(kGameMinecraft) + L"&classId=" + std::to_wstring(classId);
             if (!std::wstring{ query }.empty())
                 url += L"&searchFilter=" + std::wstring{ Http::Escape(query) };
             if (!std::wstring{ mcVersion }.empty())

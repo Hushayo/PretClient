@@ -29,8 +29,21 @@ namespace winrt::PretClient
         m_root.Children().Append(head);
         m_head = head;
 
-        // Source tabs (Modrinth | CurseForge): the active tab reads as the
-        // accent button, the other as a plain button.
+        // Content tabs (Mods | Resource Packs) above the source tabs
+        // (Modrinth | CurseForge): the active tab reads as the accent
+        // button, the other as a plain button.
+        StackPanel kindTabs{};
+        kindTabs.Orientation(Orientation::Horizontal);
+        kindTabs.Spacing(8);
+        m_tabMods.Content(box_value(L"Mods"));
+        m_tabPacks.Content(box_value(L"Resource Packs"));
+        m_tabMods.Click([this](IInspectable const&, RoutedEventArgs const&) { SetKind(Kind::Mods); });
+        m_tabPacks.Click([this](IInspectable const&, RoutedEventArgs const&) { SetKind(Kind::Packs); });
+        kindTabs.Children().Append(m_tabMods);
+        kindTabs.Children().Append(m_tabPacks);
+        m_root.Children().Append(kindTabs);
+
+        // Source tabs (Modrinth | CurseForge).
         StackPanel tabs{};
         tabs.Orientation(Orientation::Horizontal);
         tabs.Spacing(8);
@@ -41,6 +54,7 @@ namespace winrt::PretClient
         tabs.Children().Append(m_tabModrinth);
         tabs.Children().Append(m_tabCurse);
         m_root.Children().Append(tabs);
+        PaintKindTabs();
         PaintSourceTabs();
 
         StackPanel row{};
@@ -167,19 +181,26 @@ namespace winrt::PretClient
     void ModsPage::SyncFiltersFromTarget()
     {
         m_syncing = true;
+        // Resource packs have no loader: the box stays disabled and the
+        // search ignores it (MC version still filters).
+        bool packs = (m_kind == Kind::Packs);
         try
         {
             if (m_targets.empty() || m_target.SelectedIndex() < 0 ||
                 static_cast<size_t>(m_target.SelectedIndex()) >= m_targets.size())
             {
                 m_mc.Text(L"");
-                m_loader.IsEnabled(true);
+                m_loader.IsEnabled(!packs);
                 m_syncing = false;
                 return;
             }
             auto const& inst = m_targets[static_cast<size_t>(m_target.SelectedIndex())];
             m_mc.Text(inst.mcVersion);
-            if (inst.loader == L"vanilla")
+            if (packs)
+            {
+                m_loader.IsEnabled(false);
+            }
+            else if (inst.loader == L"vanilla")
             {
                 // No loader on the instance: let the user browse any loader.
                 // Reset a previously locked selection (e.g. fabric) back to
@@ -276,7 +297,9 @@ namespace winrt::PretClient
         {
             auto const& inst = m_targets[static_cast<size_t>(m_target.SelectedIndex())];
             m_lastMc = inst.mcVersion;
-            if (inst.loader == L"vanilla")
+            if (m_kind == Kind::Packs)
+                m_lastLoader = L"";
+            else if (inst.loader == L"vanilla")
                 m_lastLoader = unbox_value_or<hstring>(m_loader.SelectedItem(), L"all");
             else
                 m_lastLoader = inst.loader;
@@ -284,7 +307,9 @@ namespace winrt::PretClient
         else
         {
             m_lastMc = m_mc.Text();
-            m_lastLoader = unbox_value_or<hstring>(m_loader.SelectedItem(), L"all");
+            m_lastLoader = (m_kind == Kind::Packs)
+                ? hstring{ L"" }
+                : unbox_value_or<hstring>(m_loader.SelectedItem(), L"all");
         }
         m_offset = 0;
         m_total = 0;
@@ -309,9 +334,54 @@ namespace winrt::PretClient
         {
             auto accent = Application::Current().Resources().Lookup(box_value(L"AccentButtonStyle")).as<Style>();
             bool cf = (m_source == Source::CurseForge);
-            m_head.Text(cf ? L"Mods - CurseForge" : L"Mods - Modrinth");
             m_tabModrinth.Style(cf ? Style{ nullptr } : accent);
             m_tabCurse.Style(cf ? accent : Style{ nullptr });
+        }
+        catch (...)
+        {
+        }
+        UpdateHead();
+    }
+
+    void ModsPage::SetKind(Kind k)
+    {
+        if (m_kind == k)
+            return;
+        m_kind = k;
+        PaintKindTabs();
+        SyncFiltersFromTarget();
+        OnSearch();
+    }
+
+    void ModsPage::PaintKindTabs()
+    {
+        try
+        {
+            auto accent = Application::Current().Resources().Lookup(box_value(L"AccentButtonStyle")).as<Style>();
+            bool packs = (m_kind == Kind::Packs);
+            m_tabMods.Style(packs ? Style{ nullptr } : accent);
+            m_tabPacks.Style(packs ? accent : Style{ nullptr });
+        }
+        catch (...)
+        {
+        }
+        UpdateHead();
+    }
+
+    void ModsPage::UpdateHead()
+    {
+        try
+        {
+            bool packs = (m_kind == Kind::Packs);
+            bool cf = (m_source == Source::CurseForge);
+            if (m_head)
+                m_head.Text(packs
+                    ? (cf ? L"Resource Packs - CurseForge" : L"Resource Packs - Modrinth")
+                    : (cf ? L"Mods - CurseForge" : L"Mods - Modrinth"));
+            if (m_query)
+                m_query.PlaceholderText(packs
+                    ? L"Search resource packs..."
+                    : L"Search mods... (e.g. sodium)");
         }
         catch (...)
         {
@@ -398,6 +468,7 @@ namespace winrt::PretClient
             return;
         m_loading = true;
         int gen = m_searchGen;
+        bool packs = (m_kind == Kind::Packs);
         if (m_source == Source::CurseForge)
         {
             hstring key = CurseForge::EffectiveApiKey(LoadSettings().curseforgeKey);
@@ -407,7 +478,7 @@ namespace winrt::PretClient
                 SetStatus(L"CurseForge needs an API key: paste yours in Settings (free at the CurseForge API console).");
                 return;
             }
-            SetStatus(L"Searching CurseForge...");
+            SetStatus(packs ? L"Searching CurseForge resource packs..." : L"Searching CurseForge...");
             CurseForge::SearchAsync(
                 m_lastQuery, m_lastMc, m_lastLoader, m_offset, key,
                 [this, gen](CurseForge::SearchResult result) {
@@ -438,10 +509,11 @@ namespace winrt::PretClient
                             [this, hit]() { OnInstallCF(hit); },
                             [this, hit]() { BuildsDialogCF(hit); });
                     }
-                });
+                },
+                packs ? CurseForge::kClassResourcePacks : CurseForge::kClassMods);
             return;
         }
-        SetStatus(L"Searching Modrinth...");
+        SetStatus(packs ? L"Searching Modrinth resource packs..." : L"Searching Modrinth...");
         Modrinth::SearchAsync(
             m_lastQuery, m_lastMc, m_lastLoader, m_offset,
             [this, gen](Modrinth::SearchResult result) {
@@ -472,7 +544,8 @@ namespace winrt::PretClient
                         [this, hit]() { OnInstall(hit); },
                         [this, hit]() { BuildsDialog(hit); });
                 }
-            });
+            },
+            packs ? hstring{ L"resourcepack" } : hstring{ L"mod" });
     }
 
     fire_and_forget ModsPage::OnInstall(Modrinth::ModHit hit)
@@ -483,6 +556,27 @@ namespace winrt::PretClient
             co_return;
         }
         auto inst = m_targets[static_cast<size_t>(m_target.SelectedIndex())];
+        hstring mc = inst.mcVersion;
+        if (m_kind == Kind::Packs)
+        {
+            // Packs work on vanilla too: straight into the instance's
+            // resourcepacks folder, no loader filter, no dependencies.
+            auto settings = LoadSettings();
+            auto packs = InstanceResourcePacksDir(settings, inst.id);
+            SetStatus(hstring{ L"Resolving " } + hit.title + L"...");
+            Modrinth::PickVersionAsync(
+                hit.projectId.empty() ? hit.slug : hit.projectId, mc, L"",
+                [this, hit, packs](Modrinth::ModVersion version) {
+                    if (version.files.empty())
+                    {
+                        SetStatus(L"No matching file for this version. Try Builds for a specific one.");
+                        return;
+                    }
+                    SetStatus(hstring{ L"Installing " } + hit.title + L"...");
+                    InstallPackVersion(version, packs.wstring());
+                });
+            co_return;
+        }
         if (inst.loader == L"vanilla")
         {
             SetStatus(L"Target is vanilla (no mod loader) — mods won't load. Create a modded instance instead.");
@@ -491,7 +585,6 @@ namespace winrt::PretClient
         hstring loader = inst.loader == L"vanilla" ? m_lastLoader : inst.loader;
         if (loader == L"all")
             loader = L"";
-        hstring mc = inst.mcVersion;
         SetStatus(hstring{ L"Resolving " } + hit.title + L"...");
         Modrinth::PickVersionAsync(
             hit.projectId.empty() ? hit.slug : hit.projectId, mc, loader,
@@ -557,18 +650,59 @@ namespace winrt::PretClient
         SetStatus(main);
     }
 
+    fire_and_forget ModsPage::InstallPackVersion(Modrinth::ModVersion version,
+        std::wstring packsDir)
+    {
+        hstring status;
+        try
+        {
+            Modrinth::ModFile file{};
+            for (auto const& f : version.files)
+            {
+                if (f.primary && !f.url.empty())
+                {
+                    file = f;
+                    break;
+                }
+            }
+            if (file.url.empty())
+            {
+                for (auto const& f : version.files)
+                {
+                    if (!f.url.empty())
+                    {
+                        file = f;
+                        break;
+                    }
+                }
+            }
+            if (file.url.empty())
+            {
+                SetStatus(L"No file in that build.");
+                co_return;
+            }
+            status = co_await Modrinth::DownloadFileAsync(file, packsDir);
+        }
+        catch (...)
+        {
+            status = L"Install failed.";
+        }
+        SetStatus(status);
+    }
+
     fire_and_forget ModsPage::BuildsDialog(Modrinth::ModHit hit)
     {
         // Same instance-locked filter as the list: only builds matching the
-        // target instance version/loader are offered.
+        // target instance version/loader are offered (packs: version only).
+        bool packs = (m_kind == Kind::Packs);
         hstring mc = m_lastMc;
-        hstring loader = m_lastLoader;
+        hstring loader = packs ? hstring{ L"" } : m_lastLoader;
         if (!m_targets.empty() && m_target.SelectedIndex() >= 0 &&
             static_cast<size_t>(m_target.SelectedIndex()) < m_targets.size())
         {
             auto const& inst = m_targets[static_cast<size_t>(m_target.SelectedIndex())];
             mc = inst.mcVersion;
-            if (inst.loader != L"vanilla")
+            if (!packs && inst.loader != L"vanilla")
                 loader = inst.loader;
         }
         if (loader == L"all")
@@ -598,12 +732,14 @@ namespace winrt::PretClient
             auto inst = m_targets[static_cast<size_t>(m_target.SelectedIndex())];
             targetVanilla = (inst.loader == L"vanilla");
             auto settings = LoadSettings();
-            modsDir = InstanceModsDir(settings, inst.id).wstring();
+            modsDir = packs
+                ? InstanceResourcePacksDir(settings, inst.id).wstring()
+                : InstanceModsDir(settings, inst.id).wstring();
         }
 
         Modrinth::GetVersionsAsync(
             hit.projectId.empty() ? hit.slug : hit.projectId, mc, loader,
-            [this, list, loading, modsDir, dialog, targetVanilla, mc, loader](std::vector<Modrinth::ModVersion> versions) mutable {
+            [this, list, loading, modsDir, dialog, targetVanilla, packs, mc, loader](std::vector<Modrinth::ModVersion> versions) mutable {
                 loading.Visibility(Visibility::Collapsed);
                 if (versions.empty())
                 {
@@ -648,7 +784,25 @@ namespace winrt::PretClient
                     Button install{};
                     install.Content(box_value(L"Install this"));
                     install.VerticalAlignment(VerticalAlignment::Center);
-                    install.Click([this, v, modsDir, dialog, targetVanilla, mc, loader](IInspectable const&, RoutedEventArgs const&) mutable {
+                    install.Click([this, v, modsDir, dialog, targetVanilla, packs, mc, loader](IInspectable const&, RoutedEventArgs const&) mutable {
+                        if (packs)
+                        {
+                            if (v.files.empty() || modsDir.empty())
+                            {
+                                SetStatus(L"No file in that build (or no target instance).");
+                                return;
+                            }
+                            SetStatus(L"Installing pack...");
+                            InstallPackVersion(v, modsDir);
+                            try
+                            {
+                                dialog.Hide();
+                            }
+                            catch (...)
+                            {
+                            }
+                            return;
+                        }
                         if (targetVanilla)
                         {
                             SetStatus(L"Target is vanilla (no mod loader) — mods won't load. Create a modded instance instead.");
@@ -690,6 +844,31 @@ namespace winrt::PretClient
             co_return;
         }
         auto inst = m_targets[static_cast<size_t>(m_target.SelectedIndex())];
+        hstring mc = inst.mcVersion;
+        hstring key = CurseForge::EffectiveApiKey(LoadSettings().curseforgeKey);
+        if (key.empty())
+        {
+            SetStatus(L"CurseForge needs an API key: paste yours in Settings.");
+            co_return;
+        }
+        if (m_kind == Kind::Packs)
+        {
+            auto settings = LoadSettings();
+            auto packs = InstanceResourcePacksDir(settings, inst.id);
+            SetStatus(hstring{ L"Resolving " } + hit.title + L"... (CurseForge)");
+            CurseForge::PickVersionAsync(
+                hit.modId, mc, L"", key,
+                [this, hit, packs](CurseForge::ModVersion version) {
+                    if (version.files.empty() || version.files.front().url.empty())
+                    {
+                        SetStatus(L"No matching file for this version. Try Builds for a specific one.");
+                        return;
+                    }
+                    SetStatus(hstring{ L"Installing " } + hit.title + L"... (CurseForge)");
+                    InstallPackVersionCF(version, packs.wstring());
+                });
+            co_return;
+        }
         if (inst.loader == L"vanilla")
         {
             SetStatus(L"Target is vanilla (no mod loader) — mods won't load. Create a modded instance instead.");
@@ -698,13 +877,6 @@ namespace winrt::PretClient
         hstring loader = inst.loader == L"vanilla" ? m_lastLoader : inst.loader;
         if (loader == L"all")
             loader = L"";
-        hstring mc = inst.mcVersion;
-        hstring key = CurseForge::EffectiveApiKey(LoadSettings().curseforgeKey);
-        if (key.empty())
-        {
-            SetStatus(L"CurseForge needs an API key: paste yours in Settings.");
-            co_return;
-        }
         SetStatus(hstring{ L"Resolving " } + hit.title + L"... (CurseForge)");
         CurseForge::PickVersionAsync(
             hit.modId, mc, loader, key,
@@ -749,18 +921,39 @@ namespace winrt::PretClient
         SetStatus(main);
     }
 
+    fire_and_forget ModsPage::InstallPackVersionCF(CurseForge::ModVersion version,
+        std::wstring packsDir)
+    {
+        hstring status;
+        try
+        {
+            if (version.files.empty() || version.files.front().url.empty())
+            {
+                SetStatus(L"No file in that build.");
+                co_return;
+            }
+            status = co_await CurseForge::DownloadFileAsync(version.files.front(), packsDir);
+        }
+        catch (...)
+        {
+            status = L"Install failed.";
+        }
+        SetStatus(status);
+    }
+
     fire_and_forget ModsPage::BuildsDialogCF(CurseForge::ModHit hit)
     {
         // Same instance-locked filter as the list: only builds matching the
-        // target instance version/loader are offered.
+        // target instance version/loader are offered (packs: version only).
+        bool packs = (m_kind == Kind::Packs);
         hstring mc = m_lastMc;
-        hstring loader = m_lastLoader;
+        hstring loader = packs ? hstring{ L"" } : m_lastLoader;
         if (!m_targets.empty() && m_target.SelectedIndex() >= 0 &&
             static_cast<size_t>(m_target.SelectedIndex()) < m_targets.size())
         {
             auto const& inst = m_targets[static_cast<size_t>(m_target.SelectedIndex())];
             mc = inst.mcVersion;
-            if (inst.loader != L"vanilla")
+            if (!packs && inst.loader != L"vanilla")
                 loader = inst.loader;
         }
         if (loader == L"all")
@@ -790,7 +983,9 @@ namespace winrt::PretClient
             auto inst = m_targets[static_cast<size_t>(m_target.SelectedIndex())];
             targetVanilla = (inst.loader == L"vanilla");
             auto settings = LoadSettings();
-            modsDir = InstanceModsDir(settings, inst.id).wstring();
+            modsDir = packs
+                ? InstanceResourcePacksDir(settings, inst.id).wstring()
+                : InstanceModsDir(settings, inst.id).wstring();
         }
 
         hstring key = CurseForge::EffectiveApiKey(LoadSettings().curseforgeKey);
@@ -802,7 +997,7 @@ namespace winrt::PretClient
         {
             CurseForge::GetVersionsAsync(
                 hit.modId, mc, loader, key,
-                [this, list, loading, modsDir, dialog, targetVanilla, hit, mc, loader, key](std::vector<CurseForge::ModVersion> versions) mutable {
+                [this, list, loading, modsDir, dialog, targetVanilla, packs, hit, mc, loader, key](std::vector<CurseForge::ModVersion> versions) mutable {
                     loading.Visibility(Visibility::Collapsed);
                     if (versions.empty())
                     {
@@ -845,7 +1040,25 @@ namespace winrt::PretClient
                         Button install{};
                         install.Content(box_value(L"Install this"));
                         install.VerticalAlignment(VerticalAlignment::Center);
-                        install.Click([this, v, modsDir, dialog, targetVanilla, hit, mc, loader, key](IInspectable const&, RoutedEventArgs const&) mutable {
+                        install.Click([this, v, modsDir, dialog, targetVanilla, packs, hit, mc, loader, key](IInspectable const&, RoutedEventArgs const&) mutable {
+                            if (packs)
+                            {
+                                if (v.files.empty() || modsDir.empty())
+                                {
+                                    SetStatus(L"No file in that build (or no target instance).");
+                                    return;
+                                }
+                                SetStatus(L"Installing pack... (CurseForge)");
+                                InstallPackVersionCF(v, modsDir);
+                                try
+                                {
+                                    dialog.Hide();
+                                }
+                                catch (...)
+                                {
+                                }
+                                return;
+                            }
                             if (targetVanilla)
                             {
                                 SetStatus(L"Target is vanilla (no mod loader) — mods won't load. Create a modded instance instead.");

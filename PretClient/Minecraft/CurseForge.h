@@ -56,6 +56,10 @@ namespace winrt::PretClient::CurseForge
     using PickFn = std::function<void(ModFile)>;
     using VersionFn = std::function<void(ModVersion)>;
 
+    // CurseForge class IDs: 6 = mods, 12 = resource packs.
+    constexpr int kClassMods = 6;
+    constexpr int kClassResourcePacks = 12;
+
     // Public community key (the same one Prism Launcher documents) so the
     // CurseForge tab works out of the box. A key stored in Settings
     // overrides it via EffectiveApiKey.
@@ -70,7 +74,8 @@ namespace winrt::PretClient::CurseForge
     }
 
     winrt::fire_and_forget SearchAsync(
-        hstring query, hstring mcVersion, hstring loader, int offset, hstring apiKey, SearchFn done);
+        hstring query, hstring mcVersion, hstring loader, int offset, hstring apiKey, SearchFn done,
+        int classId = kClassMods);
     winrt::fire_and_forget GetVersionsAsync(
         int modId, hstring mcVersion, hstring loader, hstring apiKey, VersionsFn done);
     winrt::fire_and_forget PickFileAsync(
