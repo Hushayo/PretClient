@@ -88,6 +88,10 @@ namespace winrt::PretClient
         static void StageResourcePacks(std::filesystem::path const& instancePacks,
             std::filesystem::path const& gamePacks);
         winrt::fire_and_forget PlayInstance(hstring id);
+        // Locked restart for a running instance: Stop is asynchronous, so this
+        // waits until the old process is actually gone before Play — otherwise
+        // old + new overlap and the machine eats two full game heaps at once.
+        winrt::fire_and_forget RestartInstance(hstring id);
         // Post-prepare launch: mod/pack staging + Java probing run on a
         // background thread (process spawns with long waits must never block
         // the UI thread), then the build/start happens back on top of it.

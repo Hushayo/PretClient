@@ -9,9 +9,11 @@
 #include "../Minecraft/NeoForge.h"
 #include "../Minecraft/Quilt.h"
 #include <algorithm>
+#include <chrono>
 #include <commdlg.h>
 #include <fstream>
 #include <shellapi.h>
+#include <thread>
 #include "../Minecraft/Java.h"
 #include "../Minecraft/Launcher.h"
 #include "../Minecraft/Versions.h"
@@ -184,18 +186,6 @@ namespace winrt::PretClient
         m_cards.Children().Clear();
         m_cardList.clear();
         auto instances = LoadInstances();
-        // One game at a time: instances share the game dir and the RAM
-        // budget, so a second launch is refused (PlayInstance) and its
-        // button is disabled here.
-        bool anyRunning = false;
-        for (auto const& i : instances)
-        {
-            if (Launcher::IsRunning(i.id))
-            {
-                anyRunning = true;
-                break;
-            }
-        }
         for (auto const& inst : instances)
         {
             bool running = Launcher::IsRunning(inst.id);
@@ -498,7 +488,7 @@ namespace winrt::PretClient
             play.Content(box_value(L"Play"));
             play.Style(Application::Current().Resources().Lookup(box_value(L"AccentButtonStyle")).as<Style>());
             play.MinWidth(88);
-            play.IsEnabled(!running && !preparing && !anyRunning);
+            play.IsEnabled(!running && !preparing);
             play.Click([this, id](IInspectable const&, RoutedEventArgs const&) { PlayInstance(id); });
 
             Button stop{};
@@ -514,8 +504,7 @@ namespace winrt::PretClient
             restart.Content(box_value(L"Restart"));
             restart.IsEnabled(running && !preparing);
             restart.Click([this, id](IInspectable const&, RoutedEventArgs const&) {
-                Launcher::Stop(id);
-                PlayInstance(id);
+                RestartInstance(id);
             });
             buttons.Children().Append(play);
             buttons.Children().Append(stop);
@@ -2013,6 +2002,30 @@ namespace winrt::PretClient
         }
     }
 
+    fire_and_forget InstancesPage::RestartInstance(hstring id)
+    {
+        try
+        {
+            Launcher::Stop(id);
+            SetStatus(L"Stopping...");
+            Refresh();
+            co_await winrt::resume_background();
+            for (int i = 0; i < 40 && Launcher::IsRunning(id); ++i)
+                std::this_thread::sleep_for(std::chrono::milliseconds(250));
+            co_await ForegroundAwait{ m_dispatcher };
+            if (Launcher::IsRunning(id))
+            {
+                SetStatus(L"Still stopping - try again in a few seconds.");
+                Refresh();
+                co_return;
+            }
+            PlayInstance(id);
+        }
+        catch (...)
+        {
+        }
+    }
+
     fire_and_forget InstancesPage::PlayInstance(hstring id)
     {
         SetStatus(L"Preparing...");
@@ -2043,17 +2056,6 @@ namespace winrt::PretClient
         {
             SetStatus(L"Already preparing (download in progress).");
             co_return;
-        }
-        // Only one game process at a time: instances share the game dir and
-        // each reserves up to maxMem — two at once OOMs the machine.
-        for (auto const& i : LoadInstances())
-        {
-            if (i.id != id && Launcher::IsRunning(i.id))
-            {
-                hstring n = i.name.empty() ? i.id : i.name;
-                SetStatus(L"\"" + n + L"\" is already running - stop it first.");
-                co_return;
-            }
         }
         m_preparing.insert(std::wstring{ id });
         auto settings = LoadSettings();
