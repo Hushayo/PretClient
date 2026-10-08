@@ -2,13 +2,16 @@
 
 #include <functional>
 
-// Settings page: username, roaming .minecraft folder, java override, RAM.
+// Settings page: tabbed (General | Advanced) inside one scroll view.
+// General holds everyday items (profile, folders, performance); Advanced
+// holds Java overrides and the CurseForge key so the main view stays clean.
+// Save + update row sit below both tabs and always stay reachable.
 namespace winrt::PretClient
 {
     struct SettingsPage
     {
         SettingsPage();
-        Microsoft::UI::Xaml::Controls::StackPanel Root() const
+        Microsoft::UI::Xaml::Controls::Grid Root() const
         {
             return m_root;
         }
@@ -20,9 +23,17 @@ namespace winrt::PretClient
         }
 
     private:
-        Microsoft::UI::Xaml::Controls::StackPanel m_root{};
+        void SetTab(int idx);
+        void PaintTabs();
+
+        Microsoft::UI::Xaml::Controls::Grid m_root{};
         Microsoft::UI::Xaml::Controls::ScrollViewer m_scroll{};
         Microsoft::UI::Xaml::Controls::StackPanel m_inner{};
+        Microsoft::UI::Xaml::Controls::StackPanel m_general{};
+        Microsoft::UI::Xaml::Controls::StackPanel m_advanced{};
+        Microsoft::UI::Xaml::Controls::Button m_tabGeneral{};
+        Microsoft::UI::Xaml::Controls::Button m_tabAdvanced{};
+        int m_tab = 0;
         Microsoft::UI::Xaml::Controls::TextBox m_username{};
         Microsoft::UI::Xaml::Controls::TextBox m_gameDir{};
         Microsoft::UI::Xaml::Controls::TextBox m_java{};
