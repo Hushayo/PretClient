@@ -490,14 +490,27 @@ namespace winrt::PretClient
             m_versions.Items().Append(box_value(L"Loading versions..."));
             m_versions.SelectedIndex(0);
             Server::FetchVersionsAsync(softwareId, [this](std::vector<hstring> list) {
+                // FetchVersionsAsync resumes on a background thread: marshal
+                // to the UI thread before touching XAML (cross-thread touches
+                // AV the process past every catch(...) — Event 1000 0xc0000005).
                 try
                 {
-                    m_versions.Items().Clear();
-                    if (list.empty())
-                        list = Server::RecentMcVersions();
-                    for (auto const& v : list)
-                        m_versions.Items().Append(box_value(v));
-                    m_versions.SelectedIndex(0);
+                    m_ui.TryEnqueue([this, list = std::move(list)]() mutable {
+                        try
+                        {
+                            if (!m_versions)
+                                return;
+                            m_versions.Items().Clear();
+                            if (list.empty())
+                                list = Server::RecentMcVersions();
+                            for (auto const& v : list)
+                                m_versions.Items().Append(box_value(v));
+                            m_versions.SelectedIndex(0);
+                        }
+                        catch (...)
+                        {
+                        }
+                    });
                 }
                 catch (...)
                 {
@@ -554,25 +567,39 @@ namespace winrt::PretClient
                     SetStatus(L"Downloading " + hstring{ art.fileName } + L"...");
                     m_progress.IsIndeterminate(true);
                     hstring dlErr = co_await Http::DownloadToFileAsync(art.url, dest, kUA,
-                        [this](unsigned long long done, unsigned long long total, double) {
+                        [this](unsigned long long doneBytes, unsigned long long total, double) {
                             try
                             {
-                                if (total > 0)
-                                {
-                                    m_progress.IsIndeterminate(false);
-                                    m_progress.Value(
-                                        100.0 * static_cast<double>(done) / static_cast<double>(total));
-                                    wchar_t buf[128]{};
-                                    swprintf_s(buf, L"Downloading... %.0f%% (%s / %s)",
-                                        100.0 * static_cast<double>(done) / static_cast<double>(total),
-                                        MbText(done).c_str(), MbText(total).c_str());
-                                    m_status.Text(buf);
-                                }
+                                if (total == 0)
+                                    return;
+                                double pct = 100.0 * static_cast<double>(doneBytes) /
+                                    static_cast<double>(total);
+                                // Progress fires on a background thread: marshal to UI.
+                                m_ui.TryEnqueue([this, doneBytes, total, pct] {
+                                    try
+                                    {
+                                        m_progress.IsIndeterminate(false);
+                                        m_progress.Value(pct);
+                                        wchar_t buf[128]{};
+                                        swprintf_s(buf, L"Downloading... %.0f%% (%s / %s)", pct,
+                                            MbText(doneBytes).c_str(), MbText(total).c_str());
+                                        m_status.Text(buf);
+                                    }
+                                    catch (...)
+                                    {
+                                    }
+                                });
                             }
                             catch (...)
                             {
                             }
                         });
+                    DbgLog("download done");
+                    // Everything below touches XAML: hop onto the UI thread first
+                    // (continuations resume on a background thread; cross-thread
+                    // XAML touches AV the process past every catch(...)).
+                    co_await ForegroundAwait{ m_ui };
+                    DbgLog("resumed on ui");
                     if (!dlErr.empty())
                     {
                         DbgLog("download error: " + to_string(dlErr));
@@ -580,7 +607,6 @@ namespace winrt::PretClient
                         WorkDone();
                         co_return;
                     }
-                    DbgLog("download done");
                     // Size + hash checks against the published metadata.
                     if (art.size > 0)
                     {

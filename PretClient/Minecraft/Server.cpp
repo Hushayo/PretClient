@@ -532,7 +532,14 @@ namespace winrt::PretClient::Server
         catch (...)
         {
         }
-        done(std::move(out));
+        try
+        {
+            if (done)
+                done(std::move(out));
+        }
+        catch (...)
+        {
+        }
     }
 
     fire_and_forget ResolveArtifactAsync(hstring softwareId, hstring mcVersion, ArtifactFn done)
@@ -737,7 +744,14 @@ namespace winrt::PretClient::Server
         catch (...)
         {
         }
-        done(std::move(art), err);
+        try
+        {
+            if (done)
+                done(std::move(art), err);
+        }
+        catch (...)
+        {
+        }
     }
 
     std::filesystem::path ServersDir()
