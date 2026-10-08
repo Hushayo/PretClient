@@ -68,10 +68,8 @@ namespace winrt::PretClient
         Grid root{};
         root.RowDefinitions().Append(RowDefinition{});
         root.RowDefinitions().Append(RowDefinition{});
-        root.RowDefinitions().Append(RowDefinition{});
         root.RowDefinitions().GetAt(0).Height(GridLengthHelper::Auto());
-        root.RowDefinitions().GetAt(1).Height(GridLengthHelper::Auto());
-        root.RowDefinitions().GetAt(2).Height(GridLengthHelper::FromValueAndType(1.0, GridUnitType::Star));
+        root.RowDefinitions().GetAt(1).Height(GridLengthHelper::FromValueAndType(1.0, GridUnitType::Star));
 
         // Persistent update banner (hidden until a newer release is found).
         // Toasts can be missed/dismissed; this stays visible in-window with a
@@ -86,8 +84,9 @@ namespace winrt::PretClient
         Grid::SetRow(m_updateBar, 0);
         root.Children().Append(m_updateBar);
 
-        // Top-right round profile avatar (global, visible on every page).
-        m_topBar.Padding(ThicknessHelper::FromLengths(0, 8, 16, 0));
+        // Floating top-right round profile avatar (global, visible on every
+        // page): overlays the content so it owns no bar of its own.
+        m_profileButton.Margin(ThicknessHelper::FromLengths(0, 8, 16, 0));
         m_profileButton.Width(36);
         m_profileButton.Height(36);
         m_profileButton.Padding(ThicknessHelper::FromUniformLength(0));
@@ -95,7 +94,7 @@ namespace winrt::PretClient
         m_profileButton.Background(SolidColorBrush{ Theme::AccentBase() });
         m_profileButton.BorderBrush(Theme::CardStroke());
         m_profileButton.HorizontalAlignment(HorizontalAlignment::Right);
-        m_profileButton.VerticalAlignment(VerticalAlignment::Center);
+        m_profileButton.VerticalAlignment(VerticalAlignment::Top);
         m_profileButton.HorizontalContentAlignment(HorizontalAlignment::Center);
         m_profileButton.VerticalContentAlignment(VerticalAlignment::Center);
         m_profileAvatar.HorizontalAlignment(HorizontalAlignment::Center);
@@ -105,9 +104,6 @@ namespace winrt::PretClient
         m_profileAvatar.Foreground(SolidColorBrush{ Windows::UI::ColorHelper::FromArgb(255, 255, 255, 255) });
         m_profileButton.Content(m_profileAvatar);
         m_profileButton.Click([this](IInspectable const&, RoutedEventArgs const&) { m_instances.ProfileDialog(); });
-        m_topBar.Children().Append(m_profileButton);
-        Grid::SetRow(m_topBar, 1);
-        root.Children().Append(m_topBar);
 
         NavigationView nav{};
         nav.IsBackButtonVisible(NavigationViewBackButtonVisible::Collapsed);
@@ -169,8 +165,11 @@ namespace winrt::PretClient
                 FadeContent(m_instances.Root());
             }
         });
-        Grid::SetRow(nav, 2);
+        Grid::SetRow(nav, 1);
         root.Children().Append(nav);
+        // Appended after nav so the floating avatar draws above the content.
+        Grid::SetRow(m_profileButton, 1);
+        root.Children().Append(m_profileButton);
 
         // Keep the avatar initial/tooltip in sync (profile switches call
         // InstancesPage::Refresh, which nudges us via this callback).

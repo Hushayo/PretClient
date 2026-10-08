@@ -32,15 +32,14 @@ namespace winrt::PretClient
         // a timer nobody references can die mid-fade and leave the page stuck
         // at opacity 0 (invisible). Any failure restores opacity instead.
         void FadeContent(Microsoft::UI::Xaml::UIElement const& el);
-        // Round profile avatar in the top-right header: initial letter,
-        // tooltip shows full name, click opens the Profiles dialog.
+        // Floating round profile avatar (top-right over content): initial
+        // letter, tooltip shows full name, click opens the Profiles dialog.
         void RefreshProfileAvatar();
         // Persistent in-window update notice (survives a dismissed toast).
         void ShowUpdateBanner(hstring const& latest);
         void HideUpdateBanner();
 
         Microsoft::UI::Xaml::Controls::Grid m_host{};
-        Microsoft::UI::Xaml::Controls::Grid m_topBar{};
         Microsoft::UI::Xaml::Controls::Button m_profileButton{};
         Microsoft::UI::Xaml::Controls::TextBlock m_profileAvatar{};
         Microsoft::UI::Xaml::Controls::NavigationViewItem m_navInstances{};
