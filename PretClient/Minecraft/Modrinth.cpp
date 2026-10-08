@@ -65,6 +65,7 @@ namespace winrt::PretClient::Modrinth
         {
             ModVersion v{};
             v.id = OptStr(o, L"id");
+            v.projectId = OptStr(o, L"project_id");
             v.versionNumber = OptStr(o, L"version_number");
             try
             {
@@ -74,6 +75,37 @@ namespace winrt::PretClient::Modrinth
                     {
                         if (fv.ValueType() == JsonValueType::Object)
                             v.files.push_back(ToFile(fv.GetObject()));
+                    }
+                }
+                if (o.HasKey(L"dependencies"))
+                {
+                    for (auto const& dv : o.GetNamedArray(L"dependencies"))
+                    {
+                        if (dv.ValueType() != JsonValueType::Object)
+                            continue;
+                        auto d = dv.GetObject();
+                        Dependency dep{};
+                        dep.projectId = OptStr(d, L"project_id");
+                        dep.versionId = OptStr(d, L"version_id");
+                        dep.type = OptStr(d, L"dependency_type");
+                        if (!dep.projectId.empty() || !dep.versionId.empty())
+                            v.dependencies.push_back(std::move(dep));
+                    }
+                }
+                if (o.HasKey(L"game_versions"))
+                {
+                    for (auto const& gv : o.GetNamedArray(L"game_versions"))
+                    {
+                        if (gv.ValueType() == JsonValueType::String)
+                            v.gameVersions.push_back(gv.GetString());
+                    }
+                }
+                if (o.HasKey(L"loaders"))
+                {
+                    for (auto const& lv : o.GetNamedArray(L"loaders"))
+                    {
+                        if (lv.ValueType() == JsonValueType::String)
+                            v.loaders.push_back(lv.GetString());
                     }
                 }
             }
@@ -248,6 +280,78 @@ namespace winrt::PretClient::Modrinth
         {
         }
         done(std::move(picked));
+    }
+
+    fire_and_forget PickVersionAsync(hstring projectIdOrSlug, hstring mcVersion, hstring loader, VersionFn done)
+    {
+        ModVersion out{};
+        try
+        {
+            auto versions = ListedVersions(co_await VersionListJsonAsync(projectIdOrSlug, mcVersion, loader));
+            if (!versions.empty())
+                out = std::move(versions.front());
+        }
+        catch (...)
+        {
+        }
+        done(std::move(out));
+    }
+
+    IAsyncOperation<JsonArray> ListVersionsJsonAsync(
+        hstring projectIdOrSlug, hstring mcVersion, hstring loader)
+    {
+        JsonArray out{ nullptr };
+        try
+        {
+            out = co_await VersionListJsonAsync(projectIdOrSlug, mcVersion, loader);
+        }
+        catch (...)
+        {
+        }
+        co_return out;
+    }
+
+    IAsyncOperation<JsonObject> GetVersionJsonAsync(hstring versionId)
+    {
+        JsonObject out{ nullptr };
+        try
+        {
+            auto text = co_await Http::GetStringAsync(hstring{ kApi } + L"/version/" + versionId, kUA);
+            out = JsonObject::Parse(text);
+        }
+        catch (...)
+        {
+        }
+        co_return out;
+    }
+
+    IAsyncOperation<hstring> GetProjectTitleAsync(hstring projectIdOrSlug)
+    {
+        hstring title{};
+        try
+        {
+            auto text = co_await Http::GetStringAsync(hstring{ kApi } + L"/project/" + projectIdOrSlug, kUA);
+            auto o = JsonObject::Parse(text);
+            title = OptStr(o, L"title");
+            if (title.empty())
+                title = OptStr(o, L"slug");
+        }
+        catch (...)
+        {
+        }
+        co_return title;
+    }
+
+    std::vector<ModVersion> ParseVersions(JsonArray const& arr)
+    {
+        return ListedVersions(arr);
+    }
+
+    ModVersion ParseVersion(JsonObject const& o)
+    {
+        if (!o)
+            return ModVersion{};
+        return ToVersion(o);
     }
 
     IAsyncOperation<hstring> DownloadFileAsync(ModFile const& file, std::wstring const& destDir)

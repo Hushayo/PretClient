@@ -20,6 +20,14 @@ namespace winrt::PretClient::CurseForge
         long long downloads = 0;
     };
 
+    struct Dependency
+    {
+        int modId = 0;
+        // CurseForge relationType: 1 embedded, 2 optional, 3 required,
+        // 4 tool, 5 incompatible, 6 include. Only 3 is auto-installed.
+        int relationType = 0;
+    };
+
     struct ModFile
     {
         hstring url{};
@@ -27,6 +35,7 @@ namespace winrt::PretClient::CurseForge
         long long size = 0;
         hstring sha1{};
         hstring displayName{};
+        std::vector<Dependency> dependencies{};
     };
 
     struct ModVersion

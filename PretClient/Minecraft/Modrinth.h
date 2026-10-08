@@ -28,11 +28,22 @@ namespace winrt::PretClient::Modrinth
         bool primary = false;
     };
 
+    struct Dependency
+    {
+        hstring projectId{}; // empty when the author pinned only a version
+        hstring versionId{}; // author's pinned build (may be empty)
+        hstring type{}; // required | optional | incompatible | embedded
+    };
+
     struct ModVersion
     {
         hstring id{};
+        hstring projectId{};
         hstring versionNumber{};
         std::vector<ModFile> files{};
+        std::vector<Dependency> dependencies{};
+        std::vector<hstring> gameVersions{};
+        std::vector<hstring> loaders{};
     };
 
     struct SearchResult
@@ -44,6 +55,7 @@ namespace winrt::PretClient::Modrinth
     using SearchFn = std::function<void(SearchResult)>;
     using VersionsFn = std::function<void(std::vector<ModVersion>)>;
     using PickFn = std::function<void(ModFile)>;
+    using VersionFn = std::function<void(ModVersion)>;
 
     winrt::fire_and_forget SearchAsync(
         hstring query, hstring mcVersion, hstring loader, int offset, SearchFn done,
@@ -51,6 +63,20 @@ namespace winrt::PretClient::Modrinth
     winrt::fire_and_forget GetVersionsAsync(
         hstring projectIdOrSlug, hstring mcVersion, hstring loader, VersionsFn done);
     winrt::fire_and_forget PickFileAsync(hstring projectIdOrSlug, hstring mcVersion, hstring loader, PickFn done);
+    // Version-level resolve (keeps the dependency list, which PickFileAsync
+    // drops) for the auto-dependency installer in ModDeps.
+    winrt::fire_and_forget PickVersionAsync(
+        hstring projectIdOrSlug, hstring mcVersion, hstring loader, VersionFn done);
+
+    // Awaitable building blocks for ModDeps (raw WinRT JSON, so they can be
+    // co_awaited; parsing stays in plain C++ below).
+    Windows::Foundation::IAsyncOperation<Windows::Data::Json::JsonArray> ListVersionsJsonAsync(
+        hstring projectIdOrSlug, hstring mcVersion, hstring loader);
+    Windows::Foundation::IAsyncOperation<Windows::Data::Json::JsonObject> GetVersionJsonAsync(hstring versionId);
+    // Best-effort project title for "missing dependency" messages.
+    Windows::Foundation::IAsyncOperation<hstring> GetProjectTitleAsync(hstring projectIdOrSlug);
+    std::vector<ModVersion> ParseVersions(Windows::Data::Json::JsonArray const& arr);
+    ModVersion ParseVersion(Windows::Data::Json::JsonObject const& o);
 
     // Download + size check into destDir/filename. Returns a status message.
     Windows::Foundation::IAsyncOperation<hstring> DownloadFileAsync(ModFile const& file, std::wstring const& destDir);
