@@ -2203,18 +2203,88 @@ namespace winrt::PretClient
             pickedChecked = picked.checked;
             pickedBest = picked.bestMajor;
         }
+        if (javaExe.empty())
+        {
+            // Nothing usable installed: fetch a managed Temurin copy into
+            // %APPDATA%\PretClient\java instead of making the user hunt for
+            // a download. Progress paints onto the card via the dispatcher
+            // (this coroutine is on a background thread here).
+            auto dq = m_dispatcher;
+            int need = game.javaMajor;
+            if (dq)
+            {
+                dq.TryEnqueue([this, id, need]() {
+                    try
+                    {
+                        SetStatus(hstring{ L"Downloading Java " } + to_hstring(need) +
+                            L" (one-time, ~1 min)...");
+                        m_downloads[std::wstring{ id }] = DownloadState{ L"Java", 0, 0, 0.0 };
+                        if (auto* card = FindCard(id))
+                        {
+                            card->prog.Visibility(Visibility::Visible);
+                            card->prog.IsIndeterminate(true);
+                            card->progText.Visibility(Visibility::Visible);
+                            card->progText.Text(L"Downloading Java...");
+                        }
+                    }
+                    catch (...)
+                    {
+                    }
+                });
+            }
+            auto uiLog = [this, dq](hstring const& line) {
+                if (!dq)
+                    return;
+                dq.TryEnqueue([this, line]() {
+                    try
+                    {
+                        SetStatus(line);
+                    }
+                    catch (...)
+                    {
+                    }
+                });
+            };
+            auto uiProg = [this, dq, id](unsigned long long done, unsigned long long total, double bps) {
+                if (!dq)
+                    return;
+                dq.TryEnqueue([this, id, done, total, bps]() {
+                    try
+                    {
+                        m_downloads[std::wstring{ id }] = DownloadState{ L"Java", done, total, bps };
+                        if (auto* card = FindCard(id))
+                        {
+                            card->prog.Visibility(Visibility::Visible);
+                            card->progText.Visibility(Visibility::Visible);
+                            PaintProgress(*card, L"Java", done, total, bps);
+                        }
+                    }
+                    catch (...)
+                    {
+                    }
+                });
+            };
+            try
+            {
+                javaExe = co_await Java::EnsureAsync(game.javaMajor, uiLog, uiProg);
+            }
+            catch (...)
+            {
+                javaExe = L"";
+            }
+        }
 
         co_await ForegroundAwait{ m_dispatcher };
         m_preparing.erase(std::wstring{ id });
         m_downloads.erase(std::wstring{ id });
         if (javaExe.empty())
         {
-            wchar_t buf[320]{};
+            wchar_t buf[400]{};
             if (pickedBest > 0)
-                swprintf_s(buf, L"No Java %d+ found (checked %d install(s), newest is Java %d). Install a 64-bit Java %d+ or set the java.exe path in Settings.",
+                swprintf_s(buf, L"No Java %d+ found and auto-download failed (checked %d install(s), newest is Java %d). Check your connection or install a 64-bit Java %d+ manually and set java.exe in Settings.",
                     game.javaMajor, pickedChecked, pickedBest, game.javaMajor);
             else
-                swprintf_s(buf, L"No Java %d+ found (checked %d install(s)). Install a 64-bit Java %d+ or set the java.exe path in Settings.",
+                swprintf_s(buf, L"No Java %d+ found and auto-download failed (checked %d install(s)). Check your connection or install a 64-bit Java %d+ manually and set java.exe in Settings.",
                     game.javaMajor, pickedChecked, game.javaMajor);
             failed(buf);
             co_return;

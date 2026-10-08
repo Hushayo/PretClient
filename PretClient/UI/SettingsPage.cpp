@@ -2,9 +2,11 @@
 #include "SettingsPage.h"
 #include "Theme.h"
 #include "../Minecraft/CurseForge.h"
+#include "../Minecraft/Java.h"
 #include "../Paths.h"
 #include "../Settings.h"
 #include "../Update/Updater.h"
+#include <coroutine>
 
 using namespace winrt;
 using namespace Microsoft::UI::Xaml;
@@ -145,6 +147,22 @@ namespace winrt::PretClient
             m_extraJvm.AcceptsReturn(false);
             m_extraJvm.HorizontalAlignment(HorizontalAlignment::Stretch);
             body.Children().Append(m_extraJvm);
+
+            // One-click fix when auto-detect finds nothing: game launches
+            // (and the Forge/NeoForge installer + local servers) already do
+            // this automatically, this is just the manual button for it.
+            Button dlJava{};
+            dlJava.Content(box_value(L"Auto-install missing Java (8 / 17 / 21)"));
+            dlJava.HorizontalAlignment(HorizontalAlignment::Left);
+            dlJava.Click([this](IInspectable const&, RoutedEventArgs const&) { DownloadJava(); });
+            body.Children().Append(dlJava);
+
+            TextBlock javaHint{};
+            javaHint.Text(L"Downloads Temurin (Adoptium) into PretClient's own data folder - no admin rights, no PATH changes. Missing versions are fetched automatically at launch too.");
+            javaHint.Style(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>());
+            javaHint.Opacity(0.6);
+            javaHint.TextWrapping(TextWrapping::Wrap);
+            body.Children().Append(javaHint);
             m_advanced.Children().Append(MakeCard(L"Java & JVM", body));
         }
 
@@ -314,5 +332,71 @@ namespace winrt::PretClient
     void SettingsPage::SetStatus(hstring const& line)
     {
         m_status.Text(line);
+    }
+
+    winrt::fire_and_forget SettingsPage::DownloadJava()
+    {
+        Microsoft::UI::Dispatching::DispatcherQueue dq{ nullptr };
+        try
+        {
+            dq = m_root.DispatcherQueue();
+        }
+        catch (...)
+        {
+        }
+        auto say = [this, dq](hstring const& line) {
+            try
+            {
+                if (dq)
+                    dq.TryEnqueue([this, line] {
+                        try
+                        {
+                            SetStatus(line);
+                        }
+                        catch (...)
+                        {
+                        }
+                    });
+                else
+                    SetStatus(line);
+            }
+            catch (...)
+            {
+            }
+        };
+        say(L"Checking Java...");
+        // Probing (java -version spawns) and the download block: off the UI.
+        co_await winrt::resume_background();
+        int feats[] = { 8, 17, 21 };
+        for (int f : feats)
+        {
+            bool have = false;
+            try
+            {
+                if (!Java::ManagedJava(f).empty())
+                    have = true;
+                else if (!Java::PickDetailed(f).path.empty())
+                    have = true;
+            }
+            catch (...)
+            {
+            }
+            if (have)
+                continue;
+            hstring got;
+            try
+            {
+                // Callbacks fire on this (background) thread: say marshals.
+                got = co_await Java::EnsureAsync(f, say, nullptr);
+            }
+            catch (...)
+            {
+            }
+            if (got.empty())
+                say(hstring{ L"Java " } + to_hstring(f) + L" auto-download failed - check your connection.");
+            else
+                say(hstring{ L"Java " } + to_hstring(f) + L" ready.");
+        }
+        say(L"Java check done.");
     }
 }

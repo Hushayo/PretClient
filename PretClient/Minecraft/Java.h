@@ -1,8 +1,12 @@
 #pragma once
 
+#include <filesystem>
+#include <functional>
 #include <vector>
 
 // Locate a java.exe able to run a given MC version (by javaVersion.majorVersion).
+// When nothing suitable is installed, EnsureAsync downloads a Temurin JRE/JDK
+// into %APPDATA%\PretClient\java so launches Just Work.
 namespace winrt::PretClient::Java
 {
     struct Install
@@ -22,4 +26,20 @@ namespace winrt::PretClient::Java
     };
     PickResult PickDetailed(int requiredMajor);
     hstring Pick(int requiredMajor); // best candidate path, or "" when none fits
+
+    // Adoptium feature train that satisfies a MC java requirement
+    // (8 -> 8, 16/17 -> 17, everything newer -> 21).
+    int FeatureFor(int requiredMajor);
+    std::filesystem::path ManagedRoot(); // %APPDATA%\PretClient\java
+    std::filesystem::path ManagedHome(int feature); // ...\temurin-<feature>
+    // Already-downloaded managed java.exe, or "" when absent/unusable.
+    hstring ManagedJava(int requiredMajor);
+    using LogFn = std::function<void(hstring const&)>;
+    using ProgFn = std::function<void(unsigned long long done, unsigned long long total, double bytesPerSec)>;
+    // Best usable java.exe: explicit/system installs first, otherwise
+    // downloads + extracts Temurin and returns the managed java.exe.
+    // Returns "" when offline or the download fails (the caller logs the
+    // outcome). log/prog fire on the calling thread only.
+    Windows::Foundation::IAsyncOperation<hstring> EnsureAsync(
+        int requiredMajor, LogFn log, ProgFn prog);
 }

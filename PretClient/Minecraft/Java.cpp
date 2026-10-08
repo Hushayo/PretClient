@@ -1,6 +1,8 @@
 #include "pch.h"
 #include "Java.h"
+#include "Http.h"
 #include "../Paths.h"
+#include <coroutine>
 #include <future>
 
 using namespace winrt;
@@ -329,5 +331,332 @@ namespace winrt::PretClient::Java
     hstring Pick(int requiredMajor)
     {
         return PickDetailed(requiredMajor).path;
+    }
+
+    int FeatureFor(int requiredMajor)
+    {
+        if (requiredMajor <= 8)
+            return 8;
+        if (requiredMajor <= 17)
+            return 17;
+        return 21;
+    }
+
+    std::filesystem::path ManagedRoot()
+    {
+        return Paths::DataDir() / L"java";
+    }
+
+    std::filesystem::path ManagedHome(int feature)
+    {
+        return ManagedRoot() / (L"temurin-" + std::to_wstring(feature));
+    }
+
+    hstring ManagedJava(int requiredMajor)
+    {
+        try
+        {
+            int need = requiredMajor < 8 ? 8 : requiredMajor;
+            auto exe = ManagedHome(FeatureFor(need)) / L"bin" / L"java.exe";
+            std::error_code ec;
+            if (!std::filesystem::exists(exe, ec))
+                return L"";
+            auto v = Verify(hstring{ exe.wstring() });
+            if (v.major >= need && !v.path.empty())
+                return v.path;
+        }
+        catch (...)
+        {
+        }
+        return L"";
+    }
+
+    namespace
+    {
+        constexpr wchar_t kJavaUA[] = L"PretClient/0.0.1 (github.com/Hushayo/PretClient)";
+
+        bool ExtractZipWithTar(std::filesystem::path const& zip, std::filesystem::path const& dest)
+        {
+            try
+            {
+                std::error_code ec;
+                std::filesystem::create_directories(dest, ec);
+                std::wstring cmd = L"tar -xf \"" + zip.wstring() + L"\" -C \"" + dest.wstring() + L"\"";
+                STARTUPINFOW si{ sizeof(si) };
+                si.dwFlags = STARTF_USESHOWWINDOW;
+                si.wShowWindow = SW_HIDE;
+                PROCESS_INFORMATION pi{};
+                std::wstring mutableCmd = cmd;
+                if (!CreateProcessW(nullptr, mutableCmd.data(), nullptr, nullptr, FALSE,
+                        CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi))
+                    return false;
+                WaitForSingleObject(pi.hProcess, INFINITE);
+                DWORD code = 1;
+                GetExitCodeProcess(pi.hProcess, &code);
+                CloseHandle(pi.hProcess);
+                CloseHandle(pi.hThread);
+                return code == 0;
+            }
+            catch (...)
+            {
+                return false;
+            }
+        }
+
+        // All bin/java.exe candidates under an extracted tree.
+        std::vector<std::filesystem::path> FindJavaExes(std::filesystem::path const& root)
+        {
+            std::vector<std::filesystem::path> out;
+            try
+            {
+                std::error_code ec;
+                for (auto it = std::filesystem::recursive_directory_iterator(root, ec);
+                    it != std::filesystem::recursive_directory_iterator(); it.increment(ec))
+                {
+                    if (ec)
+                        break;
+                    try
+                    {
+                        auto const& p = it->path();
+                        if (_wcsicmp(p.filename().c_str(), L"java.exe") != 0)
+                            continue;
+                        if (_wcsicmp(p.parent_path().filename().c_str(), L"bin") != 0)
+                            continue;
+                        out.push_back(p);
+                        if (out.size() >= 8)
+                            break;
+                    }
+                    catch (...)
+                    {
+                    }
+                }
+            }
+            catch (...)
+            {
+            }
+            return out;
+        }
+
+        // Blocking (tar + java -version probes): caller must already be off
+        // the UI thread. Returns a verified java.exe under ManagedHome, or "".
+        hstring InstallZip(std::filesystem::path const& zip, int need, int feature)
+        {
+            std::error_code ec;
+            auto root = ManagedRoot();
+            auto target = ManagedHome(feature);
+            auto tmp = root / (L"temurin-" + std::to_wstring(feature) + L"-tmp");
+            std::filesystem::remove_all(tmp, ec);
+            std::filesystem::create_directories(tmp, ec);
+            if (!ExtractZipWithTar(zip, tmp))
+            {
+                std::filesystem::remove_all(tmp, ec);
+                std::filesystem::remove(zip, ec); // corrupt/incomplete: re-download next time
+                return L"";
+            }
+            auto candidates = FindJavaExes(tmp);
+            Install best{};
+            std::filesystem::path bestExe{};
+            for (auto const& exe : candidates)
+            {
+                try
+                {
+                    auto v = Verify(hstring{ exe.wstring() });
+                    if (v.major <= 0)
+                        continue;
+                    if (v.major < need)
+                    {
+                        if (best.major <= 0 || v.major > best.major)
+                        {
+                            best = v;
+                            bestExe = exe; // keep newest-but-too-old as fallback info
+                        }
+                        continue;
+                    }
+                    if (bestExe.empty() || v.major < best.major || best.major < need)
+                    {
+                        best = v;
+                        bestExe = exe;
+                    }
+                }
+                catch (...)
+                {
+                }
+            }
+            if (bestExe.empty() || best.major < need)
+            {
+                std::filesystem::remove_all(tmp, ec);
+                std::filesystem::remove(zip, ec);
+                return L"";
+            }
+            std::filesystem::path home;
+            try
+            {
+                home = bestExe.parent_path().parent_path(); // .../bin/java.exe -> home
+            }
+            catch (...)
+            {
+                std::filesystem::remove_all(tmp, ec);
+                return L"";
+            }
+            std::filesystem::remove_all(target, ec);
+            std::error_code renameEc;
+            std::filesystem::rename(home, target, renameEc);
+            if (renameEc)
+            {
+                // Cross-volume or locked rename: copy the tree instead.
+                try
+                {
+                    std::filesystem::create_directories(target, ec);
+                    std::filesystem::copy(home, target,
+                        std::filesystem::copy_options::recursive |
+                            std::filesystem::copy_options::overwrite_existing,
+                        renameEc);
+                }
+                catch (...)
+                {
+                    renameEc = std::make_error_code(std::errc::io_error);
+                }
+                if (renameEc)
+                {
+                    std::filesystem::remove_all(tmp, ec);
+                    return L"";
+                }
+            }
+            std::filesystem::remove_all(tmp, ec);
+            std::filesystem::remove(zip, ec); // save ~50-200MB once installed
+            auto finalExe = target / L"bin" / L"java.exe";
+            try
+            {
+                auto v = Verify(hstring{ finalExe.wstring() });
+                if (v.major >= need && !v.path.empty())
+                    return v.path;
+            }
+            catch (...)
+            {
+            }
+            return L"";
+        }
+    } // namespace
+
+    Windows::Foundation::IAsyncOperation<hstring> EnsureAsync(
+        int requiredMajor, LogFn log, ProgFn prog)
+    {
+        auto say = [log](hstring const& s) {
+            try
+            {
+                if (log)
+                    log(s);
+            }
+            catch (...)
+            {
+            }
+        };
+        int need = requiredMajor < 8 ? 8 : requiredMajor;
+        // 1. Already-downloaded managed copy (survives updates, no probing).
+        try
+        {
+            auto m = ManagedJava(need);
+            if (!m.empty())
+                co_return m;
+        }
+        catch (...)
+        {
+        }
+        // 2. Anything usable already on the system (fast, no download).
+        try
+        {
+            auto p = PickDetailed(need);
+            if (!p.path.empty())
+                co_return p.path;
+        }
+        catch (...)
+        {
+        }
+        // 3. Fetch Temurin (JRE first: ~50MB vs ~190MB JDK).
+        int feature = FeatureFor(need);
+        say(hstring{ L"Java " } + to_hstring(need) + L" not found - downloading Temurin " +
+            to_hstring(feature) + L" (one-time, ~1 min)...");
+        std::filesystem::path zip;
+        try
+        {
+            std::error_code ec;
+            std::filesystem::create_directories(ManagedRoot(), ec);
+            zip = ManagedRoot() / (L"temurin-" + std::to_wstring(feature) + L".zip");
+        }
+        catch (...)
+        {
+            say(L"Java download failed (cannot create data folder).");
+            co_return hstring{};
+        }
+        bool haveZip = false;
+        try
+        {
+            std::error_code ec;
+            if (std::filesystem::exists(zip, ec) &&
+                std::filesystem::file_size(zip, ec) > 5ull * 1024 * 1024)
+                haveZip = true;
+        }
+        catch (...)
+        {
+        }
+        if (!haveZip)
+        {
+            std::wstring feat = std::to_wstring(feature);
+            hstring urls[] = {
+                hstring{ L"https://api.adoptium.net/v3/binary/latest/" + feat +
+                    L"/ga/windows/x64/jre/hotspot/normal/eclipse" },
+                hstring{ L"https://api.adoptium.net/v3/binary/latest/" + feat +
+                    L"/ga/windows/x64/jdk/hotspot/normal/eclipse" },
+            };
+            hstring dlErr{ L"Download failed." };
+            for (auto const& url : urls)
+            {
+                try
+                {
+                    std::error_code ec;
+                    std::filesystem::remove(zip, ec);
+                    dlErr = co_await Http::DownloadToFileAsync(url, zip, kJavaUA, prog);
+                }
+                catch (...)
+                {
+                    dlErr = L"Download failed.";
+                }
+                try
+                {
+                    std::error_code ec;
+                    if (dlErr.empty() && std::filesystem::exists(zip, ec) &&
+                        std::filesystem::file_size(zip, ec) > 5ull * 1024 * 1024)
+                    {
+                        haveZip = true;
+                        break;
+                    }
+                    if (dlErr.empty())
+                        dlErr = L"Download failed.";
+                }
+                catch (...)
+                {
+                }
+            }
+            if (!haveZip)
+            {
+                say(hstring{ L"Java download failed. Check your connection, or install a 64-bit Java " } +
+                    to_hstring(need) + L"+ manually and set java.exe in Settings. (" +
+                    (dlErr.empty() ? hstring{ L"error" } : dlErr) + L")");
+                co_return hstring{};
+            }
+        }
+        say(L"Extracting Java (one-time)...");
+        // tar + java -version probes block: never on the UI thread. No
+        // log/prog calls below this hop (callbacks are only safe on the
+        // calling thread); the caller reports the outcome after awaiting.
+        co_await winrt::resume_background();
+        try
+        {
+            co_return InstallZip(zip, need, feature);
+        }
+        catch (...)
+        {
+            co_return hstring{};
+        }
     }
 }

@@ -663,8 +663,64 @@ namespace winrt::PretClient
                         hstring java = Java::Pick(Server::RequiredJava(mc));
                         if (java.empty())
                         {
+                            // No usable Java: download a managed Temurin copy
+                            // instead of failing the server setup.
+                            SetStatus(L"Java not found - downloading (one-time)...");
+                            m_progress.IsIndeterminate(true);
+                            auto jlog = [this](hstring const& line) {
+                                try
+                                {
+                                    // EnsureAsync logs from background threads.
+                                    m_ui.TryEnqueue([this, line] {
+                                        try
+                                        {
+                                            SetStatus(line);
+                                        }
+                                        catch (...)
+                                        {
+                                        }
+                                    });
+                                }
+                                catch (...)
+                                {
+                                }
+                            };
+                            auto jprog = [this](unsigned long long done, unsigned long long total, double) {
+                                try
+                                {
+                                    if (total == 0)
+                                        return;
+                                    double pct = 100.0 * static_cast<double>(done) /
+                                        static_cast<double>(total);
+                                    m_ui.TryEnqueue([this, pct] {
+                                        try
+                                        {
+                                            m_progress.IsIndeterminate(false);
+                                            m_progress.Value(pct);
+                                        }
+                                        catch (...)
+                                        {
+                                        }
+                                    });
+                                }
+                                catch (...)
+                                {
+                                }
+                            };
+                            try
+                            {
+                                java = co_await Java::EnsureAsync(Server::RequiredJava(mc), jlog, jprog);
+                            }
+                            catch (...)
+                            {
+                                java = L"";
+                            }
+                            co_await ForegroundAwait{ m_ui };
+                        }
+                        if (java.empty())
+                        {
                             SetStatus(L"No Java found for MC " + mc +
-                                L". Install a 64-bit Java or set java.exe in Settings.");
+                                L" and auto-download failed. Check your connection or install a 64-bit Java manually.");
                             WorkDone();
                             co_return;
                         }
@@ -1349,12 +1405,52 @@ namespace winrt::PretClient
         }
         co_await winrt::resume_background();
         hstring java = Java::Pick(Server::RequiredJava(entry.mcVersion));
+        if (java.empty())
+        {
+            int need = Server::RequiredJava(entry.mcVersion);
+            m_ui.TryEnqueue([this, need] {
+                try
+                {
+                    SetStatus(hstring{ L"Downloading Java " } + to_hstring(need) + L" (one-time)...");
+                }
+                catch (...)
+                {
+                }
+            });
+            auto jlog = [this](hstring const& line) {
+                try
+                {
+                    m_ui.TryEnqueue([this, line] {
+                        try
+                        {
+                            SetStatus(line);
+                            if (m_dStatus)
+                                m_dStatus.Text(line);
+                        }
+                        catch (...)
+                        {
+                        }
+                    });
+                }
+                catch (...)
+                {
+                }
+            };
+            try
+            {
+                java = co_await Java::EnsureAsync(need, jlog, nullptr);
+            }
+            catch (...)
+            {
+                java = L"";
+            }
+        }
         hstring err;
         bool ok = false;
         if (!java.empty())
             ok = Server::StartConsole(id, dir, jar, java, mem, err);
         else
-            err = L"No Java found. Install a 64-bit Java or set java.exe in Settings.";
+            err = L"No Java found and auto-download failed. Check your connection or install a 64-bit Java manually.";
         co_await ForegroundAwait{ m_ui };
         if (ok)
         {

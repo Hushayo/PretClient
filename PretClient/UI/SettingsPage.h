@@ -25,6 +25,7 @@ namespace winrt::PretClient
     private:
         void SetTab(int idx);
         void PaintTabs();
+        winrt::fire_and_forget DownloadJava();
 
         Microsoft::UI::Xaml::Controls::Grid m_root{};
         Microsoft::UI::Xaml::Controls::ScrollViewer m_scroll{};

@@ -1177,9 +1177,34 @@ namespace winrt::PretClient::Downloader
                     }
                     if (javaExe.empty())
                     {
+                        // Forge/NeoForge installers need Java too: download a
+                        // managed copy rather than failing the whole install.
+                        log(hstring{ L"Java " } + to_hstring(game.javaMajor) +
+                            L"+ not found - downloading (one-time)...");
+                        auto jprog = [prog](unsigned long long done, unsigned long long total, double bps) {
+                            try
+                            {
+                                if (prog)
+                                    prog(L"Java", done, total, bps);
+                            }
+                            catch (...)
+                            {
+                            }
+                        };
+                        try
+                        {
+                            javaExe = co_await Java::EnsureAsync(game.javaMajor, log, jprog);
+                        }
+                        catch (...)
+                        {
+                            javaExe = L"";
+                        }
+                    }
+                    if (javaExe.empty())
+                    {
                         fail(hstring{ L"No Java " } + to_hstring(game.javaMajor) +
                             hstring{ L"+ found for the " } + kindName +
-                            hstring{ L" installer. Install a 64-bit Java or set java.exe in Settings." });
+                            hstring{ L" installer and auto-download failed. Check your connection or install a 64-bit Java manually." });
                         co_return;
                     }
                     try // the installer refuses to run without a profiles file
