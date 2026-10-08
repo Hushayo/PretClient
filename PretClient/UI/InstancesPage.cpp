@@ -469,8 +469,9 @@ namespace winrt::PretClient
             gamelog.BorderBrush(Theme::CardStroke());
             gamelog.CornerRadius(CornerRadiusHelper::FromUniformRadius(8));
             gamelog.Padding(ThicknessHelper::FromUniformLength(8));
-            // Starts collapsed; UpdateStatsAsync shows it only when there is
-            // actually log text (an empty-but-visible box reads as broken).
+            // Starts collapsed; it lives behind the per-card Log tab button and
+            // is only shown while that tab is open (an empty-but-visible box
+            // reads as broken).
             gamelog.Visibility(Visibility::Collapsed);
             gamelog.Header(box_value(L"Client log"));
             body.Children().Append(gamelog);
@@ -508,6 +509,64 @@ namespace winrt::PretClient
             buttons.Children().Append(stop);
             buttons.Children().Append(restart);
 
+            Button logBtn{};
+            bool logOpen = m_logOpen.find(std::wstring{ id }) != m_logOpen.end();
+            logBtn.Content(box_value(logOpen ? L"Hide Log" : L"Log"));
+            logBtn.Click([this, id](IInspectable const&, RoutedEventArgs const&) {
+                try
+                {
+                    auto key = std::wstring{ id };
+                    bool open = false;
+                    if (auto it = m_logOpen.find(key); it == m_logOpen.end())
+                    {
+                        m_logOpen.insert(key);
+                        open = true;
+                    }
+                    else
+                    {
+                        m_logOpen.erase(it);
+                    }
+                    auto* card = FindCard(id);
+                    if (!card)
+                        return;
+                    if (card->logBtn)
+                        card->logBtn.Content(box_value(open ? L"Hide Log" : L"Log"));
+                    if (!card->gamelog)
+                        return;
+                    if (!open)
+                    {
+                        card->gamelog.Visibility(Visibility::Collapsed);
+                        return;
+                    }
+                    // Opening: prefill from the shared log files when the live
+                    // tail hasn't painted anything yet (e.g. game stopped).
+                    if (card->gamelog.Text().empty())
+                    {
+                        try
+                        {
+                            auto base = std::filesystem::path{
+                                std::wstring{ EffectiveGameDir(LoadSettings()) }
+                            };
+                            hstring tail = TailText(base / L"logs-pretclient" / L"latest.txt");
+                            if (tail.empty())
+                                tail = TailText(base / L"logs" / L"latest.log");
+                            if (!tail.empty())
+                                card->gamelog.Text(tail);
+                            else
+                                SetStatus(L"No client log yet - Play first.");
+                        }
+                        catch (...)
+                        {
+                        }
+                    }
+                    card->gamelog.Visibility(Visibility::Visible);
+                }
+                catch (...)
+                {
+                }
+            });
+            buttons.Children().Append(logBtn);
+
             if (isModded)
             {
                 Button modsBtn{};
@@ -532,6 +591,7 @@ namespace winrt::PretClient
                     return;
                 }
                 m_downloads.erase(std::wstring{ id });
+                m_logOpen.erase(std::wstring{ id });
                 auto all = LoadInstances();
                 all.erase(std::remove_if(all.begin(), all.end(),
                     [&](Instance const& i) { return i.id == id; }), all.end());
@@ -559,6 +619,27 @@ namespace winrt::PretClient
             c.prog = prog;
             c.progText = progText;
             c.gamelog = gamelog;
+            c.logBtn = logBtn;
+            // Repaint the Log tab state onto the fresh card (starts collapsed
+            // by default; prefill last text so a stopped game's log reopens).
+            if (logOpen)
+            {
+                gamelog.Visibility(Visibility::Visible);
+                try
+                {
+                    auto base = std::filesystem::path{
+                        std::wstring{ EffectiveGameDir(LoadSettings()) }
+                    };
+                    hstring tail = TailText(base / L"logs-pretclient" / L"latest.txt");
+                    if (tail.empty())
+                        tail = TailText(base / L"logs" / L"latest.log");
+                    if (!tail.empty())
+                        gamelog.Text(tail);
+                }
+                catch (...)
+                {
+                }
+            }
             m_cardList.push_back(std::move(c));
             // Repaint a download that is still in flight (tab switch or any
             // Refresh rebuilds the card collapsed by default).
@@ -1878,9 +1959,13 @@ namespace winrt::PretClient
                         card->stats.Text(L"Downloading game files...");
                     else
                         card->stats.Text(L"Ready to play");
-                    // Keep a preparing bar visible; hide the log when idle.
-                    if (!preparing)
-                        card->gamelog.Visibility(Visibility::Collapsed);
+                    // The log lives on the Log tab: keep the last text when idle
+                    // (crash logs stay readable) and follow the tab toggle.
+                    if (card->gamelog)
+                    {
+                        bool open = m_logOpen.find(std::wstring{ r.id }) != m_logOpen.end();
+                        card->gamelog.Visibility(open ? Visibility::Visible : Visibility::Collapsed);
+                    }
                     continue;
                 }
                 paintState(true, false);
@@ -1889,19 +1974,24 @@ namespace winrt::PretClient
                     r.pid,
                     Pct(r.cpu).c_str(), FormatBytes(r.ram).c_str(), Pct(sys.gpuPercent).c_str());
                 card->stats.Text(buf);
-                if (!r.tail.empty())
+                if (!r.tail.empty() && card->gamelog)
                 {
                     card->gamelog.Text(r.tail);
-                    card->gamelog.Visibility(Visibility::Visible);
+                    // Paint the text but only show it on the Log tab.
+                    bool open = m_logOpen.find(std::wstring{ r.id }) != m_logOpen.end();
+                    card->gamelog.Visibility(open ? Visibility::Visible : Visibility::Collapsed);
                     // Auto-scroll to the newest lines: park the caret at the
                     // end so the TextBox's internal ScrollViewer brings the
                     // tail into view (otherwise it sits at the top).
-                    try
+                    if (open)
                     {
-                        card->gamelog.Select(static_cast<int32_t>(r.tail.size()), 0);
-                    }
-                    catch (...)
-                    {
+                        try
+                        {
+                            card->gamelog.Select(static_cast<int32_t>(r.tail.size()), 0);
+                        }
+                        catch (...)
+                        {
+                        }
                     }
                 }
             }

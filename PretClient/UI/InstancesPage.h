@@ -59,6 +59,7 @@ namespace winrt::PretClient
             Microsoft::UI::Xaml::Controls::Button play{};
             Microsoft::UI::Xaml::Controls::Button stop{};
             Microsoft::UI::Xaml::Controls::Button restart{};
+            Microsoft::UI::Xaml::Controls::Button logBtn{};
             Microsoft::UI::Xaml::Controls::ProgressBar prog{};
             Microsoft::UI::Xaml::Controls::TextBlock progText{};
             Microsoft::UI::Xaml::Controls::TextBox gamelog{};
@@ -117,6 +118,10 @@ namespace winrt::PretClient
         // next tick skips instead of stacking up.
         std::atomic<bool> m_statsBusy{ false };
         std::map<std::wstring, DownloadState> m_downloads{};
+        // Instances with the Client-log tab open. Cards are rebuilt on every
+        // Refresh, so the toggle state lives here and is repainted onto the
+        // fresh card (same pattern as m_downloads).
+        std::set<std::wstring> m_logOpen{};
         // Instances with a prepare/download currently in flight. Blocks a
         // second Play (which would start a duplicate download fighting over
         // the same progress bar) until the first finishes or fails.
