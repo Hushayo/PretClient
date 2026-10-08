@@ -4,6 +4,7 @@
 #include "../Settings.h"
 #include "../Paths.h"
 #include "../Minecraft/Http.h"
+#include "../Minecraft/ModDeps.h"
 #include <chrono>
 #include <cwctype>
 #include <winrt/Microsoft.UI.Xaml.Controls.h>
@@ -492,33 +493,68 @@ namespace winrt::PretClient
             loader = L"";
         hstring mc = inst.mcVersion;
         SetStatus(hstring{ L"Resolving " } + hit.title + L"...");
-        Modrinth::PickFileAsync(
+        Modrinth::PickVersionAsync(
             hit.projectId.empty() ? hit.slug : hit.projectId, mc, loader,
-            [this, hit, inst](Modrinth::ModFile file) {
-                if (file.url.empty())
+            [this, hit, inst, mc, loader](Modrinth::ModVersion version) {
+                if (version.files.empty())
                 {
                     SetStatus(L"No matching file (version/loader?). Try Builds for a specific one.");
                     return;
                 }
                 auto settings = LoadSettings();
                 auto mods = InstanceModsDir(settings, inst.id);
-                SetStatus(hstring{ L"Downloading " } + file.filename + L"...");
-                InstallOneFile(file, mods.wstring());
+                SetStatus(hstring{ L"Installing " } + hit.title + L"...");
+                InstallVersion(version, mc, loader, mods.wstring());
             });
     }
 
-    fire_and_forget ModsPage::InstallOneFile(Modrinth::ModFile file, std::wstring modsDir)
+    fire_and_forget ModsPage::InstallVersion(Modrinth::ModVersion version,
+        hstring mcVersion, hstring loader, std::wstring modsDir)
     {
-        hstring status;
+        hstring main;
         try
         {
-            status = co_await Modrinth::DownloadFileAsync(file, modsDir);
+            Modrinth::ModFile file{};
+            for (auto const& f : version.files)
+            {
+                if (f.primary && !f.url.empty())
+                {
+                    file = f;
+                    break;
+                }
+            }
+            if (file.url.empty())
+            {
+                for (auto const& f : version.files)
+                {
+                    if (!f.url.empty())
+                    {
+                        file = f;
+                        break;
+                    }
+                }
+            }
+            if (file.url.empty())
+            {
+                SetStatus(L"No file in that build.");
+                co_return;
+            }
+            main = co_await Modrinth::DownloadFileAsync(file, modsDir);
+            std::wstring done{ main };
+            if (done.rfind(L"Installed", 0) == 0 || done.rfind(L"Already present", 0) == 0)
+            {
+                // Main file is down; pull required deps in the background
+                // and fold them into one status line when finished.
+                ModDeps::EnsureModrinthAsync(version, mcVersion, loader, modsDir,
+                    [this, main](ModDeps::Summary s) { SetStatus(ModDeps::FormatStatus(main, s)); });
+                co_return;
+            }
         }
         catch (...)
         {
-            status = L"Install failed.";
+            main = L"Install failed.";
         }
-        SetStatus(status);
+        SetStatus(main);
     }
 
     fire_and_forget ModsPage::BuildsDialog(Modrinth::ModHit hit)
@@ -567,7 +603,7 @@ namespace winrt::PretClient
 
         Modrinth::GetVersionsAsync(
             hit.projectId.empty() ? hit.slug : hit.projectId, mc, loader,
-            [this, list, loading, modsDir, dialog, targetVanilla](std::vector<Modrinth::ModVersion> versions) mutable {
+            [this, list, loading, modsDir, dialog, targetVanilla, mc, loader](std::vector<Modrinth::ModVersion> versions) mutable {
                 loading.Visibility(Visibility::Collapsed);
                 if (versions.empty())
                 {
@@ -612,39 +648,19 @@ namespace winrt::PretClient
                     Button install{};
                     install.Content(box_value(L"Install this"));
                     install.VerticalAlignment(VerticalAlignment::Center);
-                    install.Click([this, v, modsDir, dialog, targetVanilla](IInspectable const&, RoutedEventArgs const&) mutable {
+                    install.Click([this, v, modsDir, dialog, targetVanilla, mc, loader](IInspectable const&, RoutedEventArgs const&) mutable {
                         if (targetVanilla)
                         {
                             SetStatus(L"Target is vanilla (no mod loader) — mods won't load. Create a modded instance instead.");
                             return;
                         }
-                        Modrinth::ModFile file{};
-                        for (auto const& f : v.files)
-                        {
-                            if (f.primary && !f.url.empty())
-                            {
-                                file = f;
-                                break;
-                            }
-                        }
-                        if (file.url.empty())
-                        {
-                            for (auto const& f : v.files)
-                            {
-                                if (!f.url.empty())
-                                {
-                                    file = f;
-                                    break;
-                                }
-                            }
-                        }
-                        if (file.url.empty() || modsDir.empty())
+                        if (v.files.empty() || modsDir.empty())
                         {
                             SetStatus(L"No file in that build (or no target instance).");
                             return;
                         }
-                        SetStatus(hstring{ L"Downloading " } + file.filename + L"...");
-                        InstallOneFile(file, modsDir);
+                        SetStatus(L"Installing build...");
+                        InstallVersion(v, mc, loader, modsDir);
                         try
                         {
                             dialog.Hide();
@@ -690,33 +706,47 @@ namespace winrt::PretClient
             co_return;
         }
         SetStatus(hstring{ L"Resolving " } + hit.title + L"... (CurseForge)");
-        CurseForge::PickFileAsync(
+        CurseForge::PickVersionAsync(
             hit.modId, mc, loader, key,
-            [this, hit, inst](CurseForge::ModFile file) {
-                if (file.url.empty())
+            [this, hit, inst, mc, loader, key](CurseForge::ModVersion version) {
+                if (version.files.empty() || version.files.front().url.empty())
                 {
                     SetStatus(L"No matching file (version/loader?). Try Builds for a specific one.");
                     return;
                 }
                 auto settings = LoadSettings();
                 auto mods = InstanceModsDir(settings, inst.id);
-                SetStatus(hstring{ L"Downloading " } + file.filename + L"... (CurseForge)");
-                InstallOneFileCF(file, mods.wstring());
+                SetStatus(hstring{ L"Installing " } + hit.title + L"... (CurseForge)");
+                InstallVersionCF(version, hit.modId, mc, loader, key, mods.wstring());
             });
     }
 
-    fire_and_forget ModsPage::InstallOneFileCF(CurseForge::ModFile file, std::wstring modsDir)
+    fire_and_forget ModsPage::InstallVersionCF(CurseForge::ModVersion version, int modId,
+        hstring mcVersion, hstring loader, hstring apiKey, std::wstring modsDir)
     {
-        hstring status;
+        hstring main;
         try
         {
-            status = co_await CurseForge::DownloadFileAsync(file, modsDir);
+            if (version.files.empty() || version.files.front().url.empty())
+            {
+                SetStatus(L"No file in that build.");
+                co_return;
+            }
+            auto file = version.files.front();
+            main = co_await CurseForge::DownloadFileAsync(file, modsDir);
+            std::wstring done{ main };
+            if (done.rfind(L"Installed", 0) == 0 || done.rfind(L"Already present", 0) == 0)
+            {
+                ModDeps::EnsureCurseForgeAsync(file, modId, mcVersion, loader, apiKey, modsDir,
+                    [this, main](ModDeps::Summary s) { SetStatus(ModDeps::FormatStatus(main, s)); });
+                co_return;
+            }
         }
         catch (...)
         {
-            status = L"Install failed.";
+            main = L"Install failed.";
         }
-        SetStatus(status);
+        SetStatus(main);
     }
 
     fire_and_forget ModsPage::BuildsDialogCF(CurseForge::ModHit hit)
@@ -772,7 +802,7 @@ namespace winrt::PretClient
         {
             CurseForge::GetVersionsAsync(
                 hit.modId, mc, loader, key,
-                [this, list, loading, modsDir, dialog, targetVanilla](std::vector<CurseForge::ModVersion> versions) mutable {
+                [this, list, loading, modsDir, dialog, targetVanilla, hit, mc, loader, key](std::vector<CurseForge::ModVersion> versions) mutable {
                     loading.Visibility(Visibility::Collapsed);
                     if (versions.empty())
                     {
@@ -815,28 +845,19 @@ namespace winrt::PretClient
                         Button install{};
                         install.Content(box_value(L"Install this"));
                         install.VerticalAlignment(VerticalAlignment::Center);
-                        install.Click([this, v, modsDir, dialog, targetVanilla](IInspectable const&, RoutedEventArgs const&) mutable {
+                        install.Click([this, v, modsDir, dialog, targetVanilla, hit, mc, loader, key](IInspectable const&, RoutedEventArgs const&) mutable {
                             if (targetVanilla)
                             {
                                 SetStatus(L"Target is vanilla (no mod loader) — mods won't load. Create a modded instance instead.");
                                 return;
                             }
-                            CurseForge::ModFile file{};
-                            for (auto const& f : v.files)
-                            {
-                                if (!f.url.empty())
-                                {
-                                    file = f;
-                                    break;
-                                }
-                            }
-                            if (file.url.empty() || modsDir.empty())
+                            if (v.files.empty() || modsDir.empty())
                             {
                                 SetStatus(L"No file in that build (or no target instance).");
                                 return;
                             }
-                            SetStatus(hstring{ L"Downloading " } + file.filename + L"... (CurseForge)");
-                            InstallOneFileCF(file, modsDir);
+                            SetStatus(L"Installing build... (CurseForge)");
+                            InstallVersionCF(v, hit.modId, mc, loader, key, modsDir);
                             try
                             {
                                 dialog.Hide();

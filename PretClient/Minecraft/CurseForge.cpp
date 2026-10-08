@@ -123,6 +123,20 @@ namespace winrt::PretClient::CurseForge
                             f.sha1 = OptStr(h, L"value");
                     }
                 }
+                if (o.HasKey(L"dependencies"))
+                {
+                    for (auto const& dv : o.GetNamedArray(L"dependencies"))
+                    {
+                        if (dv.ValueType() != JsonValueType::Object)
+                            continue;
+                        auto d = dv.GetObject();
+                        Dependency dep{};
+                        dep.modId = OptInt(d, L"modId");
+                        dep.relationType = OptInt(d, L"relationType");
+                        if (dep.modId != 0)
+                            f.dependencies.push_back(dep);
+                    }
+                }
             }
             catch (...)
             {
@@ -302,6 +316,58 @@ namespace winrt::PretClient::CurseForge
         {
         }
         done(std::move(picked));
+    }
+
+    fire_and_forget PickVersionAsync(
+        int modId, hstring mcVersion, hstring loader, hstring apiKey, VersionFn done)
+    {
+        ModVersion out{};
+        try
+        {
+            auto versions = ListedVersions(co_await FileListJsonAsync(modId, mcVersion, loader, apiKey));
+            if (!versions.empty())
+                out = std::move(versions.front());
+        }
+        catch (...)
+        {
+        }
+        done(std::move(out));
+    }
+
+    IAsyncOperation<JsonArray> ListFilesJsonAsync(
+        int modId, hstring mcVersion, hstring loader, hstring apiKey)
+    {
+        JsonArray out{ nullptr };
+        try
+        {
+            out = co_await FileListJsonAsync(modId, mcVersion, loader, apiKey);
+        }
+        catch (...)
+        {
+        }
+        co_return out;
+    }
+
+    IAsyncOperation<hstring> GetModNameAsync(int modId, hstring apiKey)
+    {
+        hstring name{};
+        try
+        {
+            std::wstring url = std::wstring{ kApi } + L"/mods/" + std::to_wstring(modId);
+            auto text = co_await GetAuthedStringAsync(hstring{ url }, apiKey);
+            auto root = JsonObject::Parse(text);
+            if (root.HasKey(L"data"))
+                name = OptStr(root.GetNamedObject(L"data"), L"name");
+        }
+        catch (...)
+        {
+        }
+        co_return name;
+    }
+
+    std::vector<ModVersion> ParseVersions(JsonArray const& arr)
+    {
+        return ListedVersions(arr);
     }
 
     IAsyncOperation<hstring> DownloadFileAsync(ModFile const& file, std::wstring const& destDir)

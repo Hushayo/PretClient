@@ -209,6 +209,7 @@
     <ClInclude Include="Minecraft\Instance.h" />
     <ClInclude Include="Minecraft\Java.h" />
     <ClInclude Include="Minecraft\Launcher.h" />
+    <ClInclude Include="Minecraft\ModDeps.h" />
     <ClInclude Include="Minecraft\Modrinth.h" />
     <ClInclude Include="Minecraft\NeoForge.h" />
     <ClInclude Include="Minecraft\Quilt.h" />
@@ -236,6 +237,7 @@
     <ClCompile Include="Minecraft\Instance.cpp" />
     <ClCompile Include="Minecraft\Java.cpp" />
     <ClCompile Include="Minecraft\Launcher.cpp" />
+    <ClCompile Include="Minecraft\ModDeps.cpp" />
     <ClCompile Include="Minecraft\Modrinth.cpp" />
     <ClCompile Include="Minecraft\NeoForge.cpp" />
     <ClCompile Include="Minecraft\Quilt.cpp" />

@@ -8,7 +8,9 @@
 // open, filters locked to the selected instance's MC version/loader, live
 // search as you type, infinite scroll, per-row install into the selected
 // instance, and a per-mod builds dialog for installing one specific version.
-// Modrinth needs no key; CurseForge needs a per-user API key from Settings.
+// Required dependencies auto-install with the mod (see ModDeps); optional
+// ones are left alone. Modrinth needs no key; CurseForge needs a per-user
+// API key from Settings.
 namespace winrt::PretClient
 {
     struct ModsPage
@@ -36,10 +38,14 @@ namespace winrt::PretClient
         void ScheduleSearch();
         winrt::fire_and_forget OnSearch();
         winrt::fire_and_forget OnInstall(Modrinth::ModHit hit);
-        winrt::fire_and_forget InstallOneFile(Modrinth::ModFile file, std::wstring modsDir);
+        // Version-level install: downloads the primary file, then pulls in
+        // required dependencies for (mcVersion, loader) via ModDeps.
+        winrt::fire_and_forget InstallVersion(Modrinth::ModVersion version,
+            hstring mcVersion, hstring loader, std::wstring modsDir);
         winrt::fire_and_forget BuildsDialog(Modrinth::ModHit hit);
         winrt::fire_and_forget OnInstallCF(CurseForge::ModHit hit);
-        winrt::fire_and_forget InstallOneFileCF(CurseForge::ModFile file, std::wstring modsDir);
+        winrt::fire_and_forget InstallVersionCF(CurseForge::ModVersion version, int modId,
+            hstring mcVersion, hstring loader, hstring apiKey, std::wstring modsDir);
         winrt::fire_and_forget BuildsDialogCF(CurseForge::ModHit hit);
         winrt::fire_and_forget LoadIcon(hstring url, Microsoft::UI::Xaml::Controls::Image img);
         void SetStatus(hstring const& line);
