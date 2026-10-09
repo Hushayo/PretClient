@@ -157,13 +157,99 @@ namespace winrt::PretClient
         return base / L"instances" / id;
     }
 
+    std::filesystem::path InstanceGameDir(Settings const& s, hstring const& instanceId)
+    {
+        return InstanceDir(s, instanceId) / L"game";
+    }
+
     std::filesystem::path InstanceModsDir(Settings const& s, hstring const& instanceId)
     {
-        return InstanceDir(s, instanceId) / L"mods";
+        return InstanceGameDir(s, instanceId) / L"mods";
     }
 
     std::filesystem::path InstanceResourcePacksDir(Settings const& s, hstring const& instanceId)
     {
-        return InstanceDir(s, instanceId) / L"resourcepacks";
+        return InstanceGameDir(s, instanceId) / L"resourcepacks";
+    }
+
+    void EnsureInstanceGameDir(Settings const& s, hstring const& instanceId)
+    {
+        try
+        {
+            std::error_code ec;
+            auto root = InstanceDir(s, instanceId);
+            auto game = InstanceGameDir(s, instanceId);
+            std::filesystem::create_directories(game, ec);
+            std::filesystem::create_directories(InstanceModsDir(s, instanceId), ec);
+            std::filesystem::create_directories(InstanceResourcePacksDir(s, instanceId), ec);
+            // Migrate legacy layout (<instance>/mods -> <instance>/game/mods).
+            auto migrateDir = [&](std::filesystem::path const& oldDir,
+                                  std::filesystem::path const& newDir) {
+                try
+                {
+                    std::error_code ec2;
+                    if (!std::filesystem::exists(oldDir, ec2) || std::filesystem::exists(newDir, ec2))
+                    {
+                        // newDir always exists after create_directories above,
+                        // so only migrate when it is still empty.
+                        bool empty = true;
+                        for (auto const& e : std::filesystem::directory_iterator(newDir, ec2))
+                        {
+                            (void)e;
+                            empty = false;
+                            break;
+                        }
+                        if (!empty)
+                            return;
+                    }
+                    else
+                    {
+                        std::filesystem::create_directories(newDir, ec2);
+                    }
+                    for (auto const& e : std::filesystem::directory_iterator(oldDir, ec2))
+                    {
+                        try
+                        {
+                            auto dest = newDir / e.path().filename();
+                            std::error_code ec3;
+                            if (std::filesystem::exists(dest, ec3))
+                                continue;
+                            std::filesystem::rename(e.path(), dest, ec3);
+                            if (ec3)
+                            {
+                                // Cross-volume fallback: copy then remove.
+                                if (e.is_directory(ec3))
+                                    std::filesystem::copy(e.path(), dest,
+                                        std::filesystem::copy_options::recursive |
+                                            std::filesystem::copy_options::overwrite_existing,
+                                        ec3);
+                                else
+                                    std::filesystem::copy_file(e.path(), dest,
+                                        std::filesystem::copy_options::overwrite_existing, ec3);
+                                if (!ec3)
+                                {
+                                    std::error_code ec4;
+                                    if (e.is_directory(ec4))
+                                        std::filesystem::remove_all(e.path(), ec4);
+                                    else
+                                        std::filesystem::remove(e.path(), ec4);
+                                }
+                            }
+                        }
+                        catch (...)
+                        {
+                        }
+                    }
+                }
+                catch (...)
+                {
+                }
+            };
+            migrateDir(root / L"mods", InstanceModsDir(s, instanceId));
+            migrateDir(root / L"resourcepacks", InstanceResourcePacksDir(s, instanceId));
+        }
+        catch (...)
+        {
+        }
     }
 }

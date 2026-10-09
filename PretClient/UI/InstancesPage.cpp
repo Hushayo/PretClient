@@ -539,18 +539,16 @@ namespace winrt::PretClient
                         card->gamelog.Visibility(Visibility::Collapsed);
                         return;
                     }
-                    // Opening: prefill from the shared log files when the live
-                    // tail hasn't painted anything yet (e.g. game stopped).
+                    // Opening: prefill from this instance's log files when the
+                    // live tail hasn't painted anything yet (e.g. game stopped).
                     if (card->gamelog.Text().empty())
                     {
                         try
                         {
-                            auto base = std::filesystem::path{
-                                std::wstring{ EffectiveGameDir(LoadSettings()) }
-                            };
-                            hstring tail = TailText(base / L"logs-pretclient" / L"latest.txt");
+                            auto s = LoadSettings();
+                            hstring tail = TailText(LogFileFor(s, id));
                             if (tail.empty())
-                                tail = TailText(base / L"logs" / L"latest.log");
+                                tail = TailText(LogGameFor(s, id));
                             if (!tail.empty())
                                 card->gamelog.Text(tail);
                             else
@@ -597,6 +595,16 @@ namespace winrt::PretClient
                 all.erase(std::remove_if(all.begin(), all.end(),
                     [&](Instance const& i) { return i.id == id; }), all.end());
                 SaveInstances(all);
+                // Remove the isolated game dir so deletes free saves/logs/mods.
+                try
+                {
+                    auto s = LoadSettings();
+                    std::error_code ec;
+                    std::filesystem::remove_all(InstanceDir(s, id), ec);
+                }
+                catch (...)
+                {
+                }
                 SetStatus(L"Instance deleted.");
                 Refresh();
             });
@@ -628,12 +636,10 @@ namespace winrt::PretClient
                 gamelog.Visibility(Visibility::Visible);
                 try
                 {
-                    auto base = std::filesystem::path{
-                        std::wstring{ EffectiveGameDir(LoadSettings()) }
-                    };
-                    hstring tail = TailText(base / L"logs-pretclient" / L"latest.txt");
+                    auto s = LoadSettings();
+                    hstring tail = TailText(LogFileFor(s, id));
                     if (tail.empty())
-                        tail = TailText(base / L"logs" / L"latest.log");
+                        tail = TailText(LogGameFor(s, id));
                     if (!tail.empty())
                         gamelog.Text(tail);
                 }
@@ -1071,76 +1077,14 @@ namespace winrt::PretClient
         }
     } // namespace
 
-    void InstancesPage::StageMods(std::filesystem::path const& instanceMods,
-        std::filesystem::path const& gameMods)
+    std::filesystem::path InstancesPage::LogFileFor(Settings const& s, hstring const& id)
     {
-        // Every loader reads <gameDir>/mods, but game files are shared by all
-        // instances, so the instance's own folder is staged in right before
-        // launch. *.jar.disabled files are deliberately left behind.
-        try
-        {
-            std::error_code ec;
-            std::filesystem::create_directories(instanceMods, ec);
-            std::filesystem::create_directories(gameMods, ec);
+        return InstanceGameDir(s, id) / L"logs-pretclient" / L"latest.txt";
+    }
 
-            // First time this instance gets its own folder: adopt the jars
-            // from the old shared layout so nothing silently disappears.
-            bool emptyInstance = true;
-            for (auto const& e : std::filesystem::directory_iterator(instanceMods, ec))
-            {
-                if (e.is_regular_file(ec))
-                {
-                    emptyInstance = false;
-                    break;
-                }
-            }
-            if (emptyInstance)
-            {
-                for (auto const& e : std::filesystem::directory_iterator(gameMods, ec))
-                {
-                    if (!e.is_regular_file(ec))
-                        continue;
-                    auto ext = e.path().extension().wstring();
-                    for (auto& c : ext)
-                        c = static_cast<wchar_t>(towlower(c));
-                    if (ext != L".jar")
-                        continue;
-                    std::filesystem::copy_file(e.path(), instanceMods / e.path().filename(),
-                        std::filesystem::copy_options::overwrite_existing, ec);
-                }
-            }
-
-            // Collect first: erasing entries while a directory_iterator is
-            // mid-walk can truncate the walk on Windows.
-            std::vector<std::filesystem::path> sharedJars;
-            for (auto const& e : std::filesystem::directory_iterator(gameMods, ec))
-            {
-                if (!e.is_regular_file(ec))
-                    continue;
-                auto ext = e.path().extension().wstring();
-                for (auto& c : ext)
-                    c = static_cast<wchar_t>(towlower(c));
-                if (ext == L".jar")
-                    sharedJars.push_back(e.path());
-            }
-            for (auto const& p : sharedJars)
-                std::filesystem::remove(p, ec);
-            for (auto const& e : std::filesystem::directory_iterator(instanceMods, ec))
-            {
-                if (!e.is_regular_file(ec))
-                    continue;
-                auto ext = e.path().extension().wstring();
-                for (auto& c : ext)
-                    c = static_cast<wchar_t>(towlower(c));
-                if (ext != L".jar")
-                    continue;
-                std::filesystem::copy_file(e.path(), gameMods / e.path().filename(),
-                    std::filesystem::copy_options::overwrite_existing, ec);
-            }
-        }
-        catch (...)
-        {
-        }
+    std::filesystem::path InstancesPage::LogGameFor(Settings const& s, hstring const& id)
+    {
+        return InstanceGameDir(s, id) / L"logs" / L"latest.log";
     }
 
     namespace
@@ -1158,105 +1102,11 @@ namespace winrt::PretClient
                 return false;
             return s.compare(s.size() - suffix.size(), suffix.size(), suffix) == 0;
         }
-
-        // Enabled pack entries: *.zip files and unpacked pack folders.
-        // Anything ending in .disabled is treated as switched off.
-        bool IsPackFileName(std::wstring const& extLower)
-        {
-            return extLower == L".zip";
-        }
-
-        bool IsEnabledPackEntry(std::filesystem::directory_entry const& e)
-        {
-            std::error_code ec;
-            auto name = LowerW(e.path().filename().wstring());
-            if (EndsWith(name, L".disabled"))
-                return false;
-            if (e.is_regular_file(ec))
-                return IsPackFileName(LowerW(e.path().extension().wstring()));
-            if (e.is_directory(ec))
-                return true;
-            return false;
-        }
     } // namespace
 
-    void InstancesPage::StageResourcePacks(std::filesystem::path const& instancePacks,
-        std::filesystem::path const& gamePacks)
-    {
-        // The game only reads <gameDir>/resourcepacks, but game files are
-        // shared by all instances, so the instance's own folder is staged in
-        // right before launch. *.disabled entries are left behind (off).
-        try
-        {
-            std::error_code ec;
-            std::filesystem::create_directories(instancePacks, ec);
-            std::filesystem::create_directories(gamePacks, ec);
-
-            // First time this instance gets its own folder: adopt the packs
-            // from the old shared layout so nothing silently disappears.
-            bool emptyInstance = true;
-            for (auto const& e : std::filesystem::directory_iterator(instancePacks, ec))
-            {
-                (void)e;
-                emptyInstance = false;
-                break;
-            }
-            if (emptyInstance)
-            {
-                for (auto const& e : std::filesystem::directory_iterator(gamePacks, ec))
-                {
-                    if (!IsEnabledPackEntry(e))
-                        continue;
-                    std::error_code ec2;
-                    if (e.is_regular_file(ec2))
-                        std::filesystem::copy_file(e.path(), instancePacks / e.path().filename(),
-                            std::filesystem::copy_options::overwrite_existing, ec2);
-                    else if (e.is_directory(ec2))
-                        std::filesystem::copy(e.path(), instancePacks / e.path().filename(),
-                            std::filesystem::copy_options::recursive |
-                            std::filesystem::copy_options::overwrite_existing, ec2);
-                }
-            }
-
-            // Collect first: erasing entries while a directory_iterator is
-            // mid-walk can truncate the walk on Windows.
-            std::vector<std::filesystem::path> shared;
-            for (auto const& e : std::filesystem::directory_iterator(gamePacks, ec))
-            {
-                if (!IsEnabledPackEntry(e))
-                    continue;
-                shared.push_back(e.path());
-            }
-            for (auto const& p : shared)
-            {
-                std::error_code ec2;
-                if (std::filesystem::is_directory(p, ec2))
-                    std::filesystem::remove_all(p, ec2);
-                else
-                    std::filesystem::remove(p, ec2);
-            }
-            for (auto const& e : std::filesystem::directory_iterator(instancePacks, ec))
-            {
-                if (!IsEnabledPackEntry(e))
-                    continue;
-                std::error_code ec2;
-                if (e.is_regular_file(ec2))
-                    std::filesystem::copy_file(e.path(), gamePacks / e.path().filename(),
-                        std::filesystem::copy_options::overwrite_existing, ec2);
-                else if (e.is_directory(ec2))
-                {
-                    auto dest = gamePacks / e.path().filename();
-                    std::filesystem::remove_all(dest, ec2);
-                    std::filesystem::copy(e.path(), dest,
-                        std::filesystem::copy_options::recursive |
-                        std::filesystem::copy_options::overwrite_existing, ec2);
-                }
-            }
-        }
-        catch (...)
-        {
-        }
-    }
+    // NOTE: legacy StageMods/StageResourcePacks removed. Mods/packs live in
+    // <instance>/game/mods|resourcepacks and are read in place; no
+    // shared-folder staging, so instances can run side by side.
 
     fire_and_forget InstancesPage::ModsDialog(hstring id)
     {
@@ -1864,17 +1714,32 @@ namespace winrt::PretClient
         try
         {
             // Snapshot on the UI thread: Refresh() mutates this list here.
+            // Log paths are per-instance now, so snapshot those too.
             std::vector<hstring> ids;
             std::vector<bool> preparingSnap;
-            for (auto const& card : m_cardList)
+            std::vector<std::filesystem::path> logFiles;
+            std::vector<std::filesystem::path> logGames;
+            try
             {
-                ids.push_back(card.id);
-                preparingSnap.push_back(
-                    m_preparing.find(std::wstring{ card.id }) != m_preparing.end());
+                auto s = LoadSettings();
+                for (auto const& card : m_cardList)
+                {
+                    ids.push_back(card.id);
+                    preparingSnap.push_back(
+                        m_preparing.find(std::wstring{ card.id }) != m_preparing.end());
+                    logFiles.push_back(LogFileFor(s, card.id));
+                    logGames.push_back(LogGameFor(s, card.id));
+                }
             }
-            auto logBase = std::filesystem::path{ std::wstring{ EffectiveGameDir(LoadSettings()) } };
-            auto logFile = logBase / L"logs-pretclient" / L"latest.txt";
-            auto logGame = logBase / L"logs" / L"latest.log";
+            catch (...)
+            {
+                for (auto const& card : m_cardList)
+                {
+                    ids.push_back(card.id);
+                    preparingSnap.push_back(
+                        m_preparing.find(std::wstring{ card.id }) != m_preparing.end());
+                }
+            }
 
             co_await winrt::resume_background();
             // Everything below may block (PDH, process queries, disk reads)
@@ -1891,8 +1756,9 @@ namespace winrt::PretClient
                 hstring tail{};
             };
             std::vector<Row> rows;
-            for (auto const& id : ids)
+            for (size_t i = 0; i < ids.size(); ++i)
             {
+                auto const& id = ids[i];
                 Row r{};
                 r.id = id;
                 r.running = Launcher::IsRunning(id);
@@ -1905,9 +1771,12 @@ namespace winrt::PretClient
                 r.pid = Launcher::Pid(id);
                 r.cpu = m_sampler.PollProcessCpu(r.handle);
                 r.ram = m_sampler.ProcessPrivateBytes(r.handle);
-                r.tail = TailText(logFile);
-                if (r.tail.empty())
-                    r.tail = TailText(logGame); // log4j file log: written even when the stdout redirect yields nothing
+                std::filesystem::path lf = i < logFiles.size() ? logFiles[i] : std::filesystem::path{};
+                std::filesystem::path lg = i < logGames.size() ? logGames[i] : std::filesystem::path{};
+                if (!lf.empty())
+                    r.tail = TailText(lf);
+                if (r.tail.empty() && !lg.empty())
+                    r.tail = TailText(lg); // log4j file log: written even when the stdout redirect yields nothing
                 rows.push_back(std::move(r));
             }
 
@@ -2059,12 +1928,12 @@ namespace winrt::PretClient
         }
         m_preparing.insert(std::wstring{ id });
         auto settings = LoadSettings();
-        std::wstring gameDir{ EffectiveGameDir(settings) };
-        auto instanceMods = InstanceModsDir(settings, id);
-        auto gameMods = std::filesystem::path{ gameDir } / L"mods";
-        auto instancePacks = InstanceResourcePacksDir(settings, id);
-        auto gamePacks = std::filesystem::path{ gameDir } / L"resourcepacks";
-        bool isModded = (inst.loader != L"vanilla");
+        // Split layout: shared cache + per-instance game dir. Migration of
+        // legacy <instance>/mods|resourcepacks runs here so Mods/Packs dialogs
+        // and the launch below all see the new paths.
+        EnsureInstanceGameDir(settings, id);
+        std::wstring cacheDir{ EffectiveGameDir(settings) };
+        auto instanceGameDir = InstanceGameDir(settings, id);
         hstring username = settings.username.empty() ? hstring{ L"Steve" } : settings.username;
         hstring javaPath = settings.javaPath;
         int minMem = settings.minMemMb;
@@ -2144,12 +2013,12 @@ namespace winrt::PretClient
             }
         };
         Downloader::PrepareAsync(
-            inst.mcVersion, inst.loader, inst.loaderVersion, gameDir,
-            isModded ? std::wstring{ instanceMods.wstring() } : std::wstring{},
+            inst.mcVersion, inst.loader, inst.loaderVersion, cacheDir,
+            instanceGameDir.wstring(),
             javaPath,
             logCb, progCb,
-            [this, id, username, javaPath, minMem, maxMem, fail, isModded, instanceMods, gameMods,
-                instancePacks, gamePacks, fpsBoost, extraJvmArgs, highPriority](
+            [this, id, username, javaPath, minMem, maxMem, fail, instanceGameDir,
+                fpsBoost, extraJvmArgs, highPriority](
                 bool ok, Downloader::PreparedGame game, hstring error) {
                 if (!ok)
                 {
@@ -2157,15 +2026,14 @@ namespace winrt::PretClient
                     return;
                 }
                 FinishLaunch(id, username, javaPath, minMem, maxMem,
-                    std::move(game), isModded, instanceMods, gameMods,
-                    instancePacks, gamePacks, fpsBoost, extraJvmArgs, highPriority);
+                    std::move(game), instanceGameDir,
+                    fpsBoost, extraJvmArgs, highPriority);
             });
     }
 
     fire_and_forget InstancesPage::FinishLaunch(hstring id, hstring username, hstring javaPath,
-        int minMem, int maxMem, Downloader::PreparedGame game, bool isModded,
-        std::filesystem::path instanceMods, std::filesystem::path gameMods,
-        std::filesystem::path instancePacks, std::filesystem::path gamePacks,
+        int minMem, int maxMem, Downloader::PreparedGame game,
+        std::filesystem::path instanceGameDir,
         bool fpsBoost, hstring extraJvmArgs, bool highPriority)
     {
         auto failed = [this, id](hstring const& msg) {
@@ -2182,11 +2050,21 @@ namespace winrt::PretClient
         co_await winrt::resume_background();
         // Everything down to the foreground hop may block (disk copies,
         // java -version probes with long waits) and now runs off the UI.
-        if (isModded)
-            StageMods(instanceMods, gameMods);
-        // Resource packs work on every loader (incl. vanilla): the game only
-        // reads the shared folder, so the instance's packs stage in here.
-        StageResourcePacks(instancePacks, gamePacks);
+        // No staging: mods/packs/saves live in the per-instance game dir.
+        // Make sure the work dir exists (the game is launched with it as cwd
+        // and writes logs-pretclient/latest.txt there).
+        try
+        {
+            std::error_code ec;
+            std::filesystem::create_directories(instanceGameDir, ec);
+            // The downloader already set gameDir, but re-assert in case an
+            // offline/cached path was assembled from the shared cache.
+            if (!instanceGameDir.empty())
+                game.gameDir = hstring{ instanceGameDir.wstring() };
+        }
+        catch (...)
+        {
+        }
         hstring javaExe = javaPath;
         if (!javaExe.empty())
         {
@@ -2295,7 +2173,7 @@ namespace winrt::PretClient
         hstring err;
         if (Launcher::Start(cmd, id, err, highPriority, fpsBoost))
             SetStatus(hstring{ L"Running (pid " } + to_hstring(static_cast<std::uint32_t>(Launcher::Pid(id))) +
-                L"). Game log below and in logs-pretclient/latest.txt");
+                L"). Game log below and in instances/<id>/game/logs-pretclient/latest.txt");
         else
             SetStatus(hstring{ L"Launch failed: " } + err);
         Refresh();

@@ -3,7 +3,9 @@
 #include <vector>
 
 // One launcher instance: a named MC version + loader combo.
-// Game files live in the shared roaming .minecraft folder.
+// Each instance runs in its own <cache>/instances/<id>/game folder;
+// the shared roaming .minecraft folder is only the download cache
+// (libraries, assets, versions).
 namespace winrt::PretClient
 {
     struct Instance

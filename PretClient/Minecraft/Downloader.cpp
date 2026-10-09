@@ -564,7 +564,10 @@ namespace winrt::PretClient::Downloader
                 catch (...)
                 {
                 }
-                game.gameDir = hstring{ gamePath.wstring() };
+                game.gameDir = game.gameDir.empty()
+                    ? hstring{ gamePath.wstring() }
+                    : game.gameDir;
+                game.cacheDir = hstring{ gamePath.wstring() };
                 game.assetsDir = hstring{ (gamePath / L"assets").wstring() };
                 game.nativesDir = hstring{ (versionsDir / L"natives").wstring() };
                 game.clientJar = hstring{
@@ -766,11 +769,24 @@ namespace winrt::PretClient::Downloader
 
     fire_and_forget PrepareAsync(
         hstring mcVersion, hstring loader, hstring loaderVersion,
-        std::wstring gameDir, std::wstring modsDir, hstring javaPathHint,
+        std::wstring cacheDir, std::wstring instanceGameDir, hstring javaPathHint,
         LogFn log, FileProgFn prog, DoneFn done)
     {
         auto fail = [&](hstring const& msg) { done(false, PreparedGame{}, msg); };
         PreparedGame game{};
+        // Per-instance work dir is known up front; the shared cache holds
+        // everything versioned. Both are created here so later steps (and
+        // offline builds) can rely on them existing.
+        try
+        {
+            std::error_code ec0;
+            std::filesystem::create_directories(std::filesystem::path{ instanceGameDir }, ec0);
+            game.gameDir = hstring{ instanceGameDir };
+            game.cacheDir = hstring{ cacheDir };
+        }
+        catch (...)
+        {
+        }
         try
         {
             bool isFabric = (loader == L"fabric");
@@ -783,7 +799,7 @@ namespace winrt::PretClient::Downloader
                 : isQuilt              ? hstring{ L"Quilt" }
                                        : hstring{ L"Fabric" };
             hstring useLoader = loaderVersion;
-            std::filesystem::path gamePathEarly{ gameDir };
+            std::filesystem::path gamePathEarly{ cacheDir };
             if (isModded && useLoader.empty())
             {
                 log(hstring{ L"Resolving " } + loader + hstring{ L" loader..." });
@@ -1035,9 +1051,13 @@ namespace winrt::PretClient::Downloader
             if (game.javaMajor < 8)
                 game.javaMajor = 8;
 
-            std::filesystem::path gamePath{ gameDir };
+            std::filesystem::path gamePath{ cacheDir };
             std::filesystem::path versionsDir = gamePath / L"versions" / std::filesystem::path{ std::wstring{ vanillaId } };
             std::filesystem::path libsDir = gamePath / L"libraries";
+            // Re-assert the split: cache holds versions/libraries, instance dir
+            // is the work dir. BuildOfflineGame verifies cache files only.
+            game.gameDir = hstring{ instanceGameDir };
+            game.cacheDir = hstring{ cacheDir };
 
             if (versionFromCache)
             {
@@ -1096,7 +1116,8 @@ namespace winrt::PretClient::Downloader
                 co_return;
             }
             game.assetsDir = hstring{ (gamePath / L"assets").wstring() };
-            game.gameDir = hstring{ gamePath.wstring() };
+            game.gameDir = hstring{ instanceGameDir };
+            game.cacheDir = hstring{ cacheDir };
             game.nativesDir = hstring{ (versionsDir / L"natives").wstring() };
             std::error_code ec;
             std::filesystem::create_directories(versionsDir, ec);
@@ -1232,8 +1253,8 @@ namespace winrt::PretClient::Downloader
                     if (!HasLoaderMain(game.loaderProfile))
                     {
                         fail(kindName + hstring{ L" installer failed (exit " } +
-                            to_hstring(exit) + hstring{ L"). See logs-pretclient/" } +
-                            installLogName);
+                            to_hstring(exit) + hstring{ L"). See " } +
+                            hstring{ installLog.wstring() });
                         co_return;
                     }
                     try
@@ -1592,9 +1613,8 @@ namespace winrt::PretClient::Downloader
             if (isFabric)
             {
                 log(L"Fabric API...");
-                std::wstring target = modsDir.empty()
-                    ? (std::filesystem::path{ std::wstring{ game.gameDir } } / L"mods").wstring()
-                    : modsDir;
+                std::wstring target =
+                    (std::filesystem::path{ std::wstring{ game.gameDir } } / L"mods").wstring();
                 hstring msg = co_await Modrinth::EnsureFabricApiAsync(target, vanillaId);
                 log(hstring{ L"  " } + msg);
             }

@@ -137,6 +137,9 @@ namespace winrt::PretClient::Launcher
         cmd.workDir = game.gameDir;
 
         std::wstring gameDir{ game.gameDir };
+        // Shared cache holds libraries/assets/versions; gameDir is the
+        // per-instance work dir. Fall back to gameDir for old callers.
+        std::wstring cacheDir{ game.cacheDir.empty() ? std::wstring{ game.gameDir } : std::wstring{ game.cacheDir } };
         std::wstring natives{ game.nativesDir };
         std::wstring assets{ game.assetsDir };
         std::wstring clientJar{ game.clientJar };
@@ -149,7 +152,7 @@ namespace winrt::PretClient::Launcher
                 cp += L";";
             cp += jar;
         };
-        std::filesystem::path libsRoot = std::filesystem::path{ gameDir } / L"libraries";
+        std::filesystem::path libsRoot = std::filesystem::path{ cacheDir } / L"libraries";
         try
         {
             if (game.versionJson && game.versionJson.HasKey(L"libraries"))

@@ -17,6 +17,7 @@
 // but opened from the MainWindow top-right round avatar.
 namespace winrt::PretClient
 {
+    struct Settings;
     namespace Downloader
     {
         struct PreparedGame;
@@ -77,28 +78,23 @@ namespace winrt::PretClient
         // on the UI thread), then applies the text updates on top of it.
         winrt::fire_and_forget UpdateStatsAsync();
         static hstring TailText(std::filesystem::path const& file);
-        // Copy the instance's enabled mods into <gameDir>/mods right before
-        // launch (loaders only read that folder, game files stay shared).
-        static void StageMods(std::filesystem::path const& instanceMods,
-            std::filesystem::path const& gameMods);
-        // Copy the instance's enabled resource packs into
-        // <gameDir>/resourcepacks right before launch (the game only reads
-        // that folder, game files stay shared). Runs for every loader
-        // including vanilla.
-        static void StageResourcePacks(std::filesystem::path const& instancePacks,
-            std::filesystem::path const& gamePacks);
+        // Per-instance game dir: <cache>/instances/<id>/game. Each instance
+        // runs with its own saves/configs/logs/mods, so versions never clash
+        // and each card tails its own log files.
+        static std::filesystem::path LogFileFor(Settings const& s, hstring const& id);
+        static std::filesystem::path LogGameFor(Settings const& s, hstring const& id);
         winrt::fire_and_forget PlayInstance(hstring id);
         // Locked restart for a running instance: Stop is asynchronous, so this
         // waits until the old process is actually gone before Play — otherwise
         // old + new overlap and the machine eats two full game heaps at once.
         winrt::fire_and_forget RestartInstance(hstring id);
-        // Post-prepare launch: mod/pack staging + Java probing run on a
-        // background thread (process spawns with long waits must never block
-        // the UI thread), then the build/start happens back on top of it.
+        // Post-prepare launch: Java probing runs on a background thread
+        // (process spawns with long waits must never block the UI thread),
+        // then the build/start happens back on top of it. Mods/packs live in
+        // the per-instance game dir already, so no staging is needed.
         winrt::fire_and_forget FinishLaunch(hstring id, hstring username, hstring javaPath,
-            int minMem, int maxMem, Downloader::PreparedGame game, bool isModded,
-            std::filesystem::path instanceMods, std::filesystem::path gameMods,
-            std::filesystem::path instancePacks, std::filesystem::path gamePacks,
+            int minMem, int maxMem, Downloader::PreparedGame game,
+            std::filesystem::path instanceGameDir,
             bool fpsBoost, hstring extraJvmArgs, bool highPriority);
         winrt::fire_and_forget ModsDialog(hstring id);
         winrt::fire_and_forget ResourcePacksDialog(hstring id);
