@@ -25,6 +25,10 @@ namespace winrt::PretClient::Java
         int bestMajor = 0; // newest major seen (even when too old)
     };
     PickResult PickDetailed(int requiredMajor);
+    // Same, but never returns a newer major than maxMajor (maxMajor <= 0 =
+    // no cap). Legacy launchwrapper versions die on Java 9+, so they pin
+    // required == max == 8. bestMajor is the newest major within the cap.
+    PickResult PickCapped(int requiredMajor, int maxMajor);
     hstring Pick(int requiredMajor); // best candidate path, or "" when none fits
 
     // Adoptium feature train that satisfies a MC java requirement
@@ -38,8 +42,10 @@ namespace winrt::PretClient::Java
     using ProgFn = std::function<void(unsigned long long done, unsigned long long total, double bytesPerSec)>;
     // Best usable java.exe: explicit/system installs first, otherwise
     // downloads + extracts Temurin and returns the managed java.exe.
+    // maxMajor (>0) pins the ceiling: legacy launchwrapper versions pass 8
+    // here so a Java 21 box still ends up on Temurin 8 instead of crashing.
     // Returns "" when offline or the download fails (the caller logs the
     // outcome). log/prog fire on the calling thread only.
     Windows::Foundation::IAsyncOperation<hstring> EnsureAsync(
-        int requiredMajor, LogFn log, ProgFn prog);
+        int requiredMajor, LogFn log, ProgFn prog, int maxMajor = 0);
 }

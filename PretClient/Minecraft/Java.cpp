@@ -302,6 +302,11 @@ namespace winrt::PretClient::Java
 
     PickResult PickDetailed(int requiredMajor)
     {
+        return PickCapped(requiredMajor, 0);
+    }
+
+    PickResult PickCapped(int requiredMajor, int maxMajor)
+    {
         PickResult r{};
         try
         {
@@ -310,6 +315,8 @@ namespace winrt::PretClient::Java
             Install const* best = nullptr;
             for (auto const& in : all)
             {
+                if (maxMajor > 0 && in.major > maxMajor)
+                    continue;
                 if (in.major > r.bestMajor)
                     r.bestMajor = in.major;
                 if (in.major < requiredMajor)
@@ -539,7 +546,7 @@ namespace winrt::PretClient::Java
     } // namespace
 
     Windows::Foundation::IAsyncOperation<hstring> EnsureAsync(
-        int requiredMajor, LogFn log, ProgFn prog)
+        int requiredMajor, LogFn log, ProgFn prog, int maxMajor)
     {
         auto say = [log](hstring const& s) {
             try
@@ -552,12 +559,26 @@ namespace winrt::PretClient::Java
             }
         };
         int need = requiredMajor < 8 ? 8 : requiredMajor;
+        int cap = maxMajor > 0 ? maxMajor : 0;
         // 1. Already-downloaded managed copy (survives updates, no probing).
+        // With a cap the managed copy must also satisfy it (a managed 21
+        // must not satisfy a legacy Java-8-only launch).
         try
         {
             auto m = ManagedJava(need);
             if (!m.empty())
-                co_return m;
+            {
+                if (cap <= 0)
+                    co_return m;
+                try
+                {
+                    if (Verify(m).major <= cap)
+                        co_return m;
+                }
+                catch (...)
+                {
+                }
+            }
         }
         catch (...)
         {
@@ -565,7 +586,7 @@ namespace winrt::PretClient::Java
         // 2. Anything usable already on the system (fast, no download).
         try
         {
-            auto p = PickDetailed(need);
+            auto p = PickCapped(need, cap);
             if (!p.path.empty())
                 co_return p.path;
         }
@@ -573,7 +594,7 @@ namespace winrt::PretClient::Java
         {
         }
         // 3. Fetch Temurin (JRE first: ~50MB vs ~190MB JDK).
-        int feature = FeatureFor(need);
+        int feature = FeatureFor(cap > 0 ? cap : need);
         say(hstring{ L"Java " } + to_hstring(need) + L" not found - downloading Temurin " +
             to_hstring(feature) + L" (one-time, ~1 min)...");
         std::filesystem::path zip;

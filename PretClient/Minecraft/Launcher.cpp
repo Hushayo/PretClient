@@ -524,7 +524,10 @@ namespace winrt::PretClient::Launcher
                 CloseHandle(logH);
             if (!ok)
             {
-                error = L"Could not start Java.";
+                DWORD gle = GetLastError();
+                wchar_t ebuf[128]{};
+                swprintf_s(ebuf, L"Could not start Java (error %lu).", gle);
+                error = ebuf;
                 return false;
             }
             CloseHandle(pi.hThread);

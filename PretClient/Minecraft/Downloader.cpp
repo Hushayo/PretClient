@@ -37,6 +37,64 @@ namespace winrt::PretClient::Downloader
             return hstring{};
         }
 
+        // Legacy launchwrapper (pre-1.6 vanilla, old Forge: effective
+        // mainClass net.minecraft.launchwrapper.Launch) casts the app class
+        // loader to URLClassLoader, which throws on Java 9+. Mojang marks
+        // these javaVersion.component "jre-legacy" and ships Java 8 for
+        // them. Mirror that: pin major == max == 8 so the picker and the
+        // Temurin auto-download land on 8 instead of the newest install.
+        void ApplyJavaRule(PreparedGame& game)
+        {
+            int major = 8;
+            hstring component;
+            try
+            {
+                if (game.versionJson && game.versionJson.HasKey(L"javaVersion"))
+                {
+                    auto jv = game.versionJson.GetNamedObject(L"javaVersion");
+                    if (jv.HasKey(L"majorVersion"))
+                        major = static_cast<int>(jv.GetNamedNumber(L"majorVersion"));
+                    component = OptStr(jv, L"component");
+                }
+            }
+            catch (...)
+            {
+            }
+            if (major < 8)
+                major = 8;
+            game.javaMajor = major;
+            bool legacy = (component == hstring{ L"jre-legacy" });
+            try
+            {
+                hstring main;
+                if (game.versionJson && game.versionJson.HasKey(L"mainClass"))
+                    main = game.versionJson.GetNamedString(L"mainClass");
+                if (game.loaderProfile && game.loaderProfile.HasKey(L"mainClass"))
+                {
+                    hstring lm = game.loaderProfile.GetNamedString(L"mainClass");
+                    if (!lm.empty())
+                        main = lm;
+                }
+                if (main == hstring{ L"net.minecraft.launchwrapper.Launch" })
+                    legacy = true;
+            }
+            catch (...)
+            {
+            }
+            game.javaMax = legacy ? 8 : 0;
+        }
+
+        // A probed java.exe is usable when it meets the floor and (for
+        // legacy launches) the ceiling.
+        bool JavaFits(int major, int req, int max)
+        {
+            if (major < req)
+                return false;
+            if (max > 0 && major > max)
+                return false;
+            return major > 0;
+        }
+
         hstring DescribeException(std::exception const& e)
         {
             return to_hstring(e.what());
@@ -544,18 +602,7 @@ namespace winrt::PretClient::Downloader
             {
                 if (!game.versionJson)
                     return L"Cached version data is missing. Connect once to download it.";
-                try
-                {
-                    if (game.versionJson.HasKey(L"javaVersion"))
-                        game.javaMajor = static_cast<int>(
-                            game.versionJson.GetNamedObject(L"javaVersion")
-                                .GetNamedNumber(L"majorVersion"));
-                }
-                catch (...)
-                {
-                }
-                if (game.javaMajor < 8)
-                    game.javaMajor = 8;
+                ApplyJavaRule(game);
                 try
                 {
                     game.assetIndexId = OptStr(
@@ -1040,16 +1087,10 @@ namespace winrt::PretClient::Downloader
                 log(hstring{ L"Offline: using cached " } + vanillaId);
             }
 
-            try
-            {
-                if (game.versionJson.HasKey(L"javaVersion"))
-                    game.javaMajor = static_cast<int>(game.versionJson.GetNamedObject(L"javaVersion").GetNamedNumber(L"majorVersion"));
-            }
-            catch (...)
-            {
-            }
-            if (game.javaMajor < 8)
-                game.javaMajor = 8;
+            // Floor + legacy ceiling (jre-legacy / launchwrapper -> Java 8).
+            // Re-applied after the forge/neoforge profile lands so a
+            // launchwrapper loader entry point also pins to 8.
+            ApplyJavaRule(game);
 
             std::filesystem::path gamePath{ cacheDir };
             std::filesystem::path versionsDir = gamePath / L"versions" / std::filesystem::path{ std::wstring{ vanillaId } };
@@ -1184,13 +1225,13 @@ namespace winrt::PretClient::Downloader
                     }
                     log(hstring{ L"Locating Java for the installer..." });
                     hstring javaExe = javaPathHint;
-                    if (!javaExe.empty() && Java::Verify(javaExe).major < game.javaMajor)
+                    if (!javaExe.empty() && !JavaFits(Java::Verify(javaExe).major, game.javaMajor, game.javaMax))
                         javaExe = L"";
                     if (javaExe.empty())
                     {
                         try
                         {
-                            javaExe = Java::PickDetailed(game.javaMajor).path;
+                            javaExe = Java::PickCapped(game.javaMajor, game.javaMax).path;
                         }
                         catch (...)
                         {
@@ -1200,8 +1241,13 @@ namespace winrt::PretClient::Downloader
                     {
                         // Forge/NeoForge installers need Java too: download a
                         // managed copy rather than failing the whole install.
-                        log(hstring{ L"Java " } + to_hstring(game.javaMajor) +
-                            L"+ not found - downloading (one-time)...");
+                        // Legacy installers pin to Java 8 like the game does.
+                        if (game.javaMax > 0)
+                            log(hstring{ L"Java " } + to_hstring(game.javaMax) +
+                                L" not found - downloading (one-time)...");
+                        else
+                            log(hstring{ L"Java " } + to_hstring(game.javaMajor) +
+                                L"+ not found - downloading (one-time)...");
                         auto jprog = [prog](unsigned long long done, unsigned long long total, double bps) {
                             try
                             {
@@ -1214,7 +1260,7 @@ namespace winrt::PretClient::Downloader
                         };
                         try
                         {
-                            javaExe = co_await Java::EnsureAsync(game.javaMajor, log, jprog);
+                            javaExe = co_await Java::EnsureAsync(game.javaMajor, log, jprog, game.javaMax);
                         }
                         catch (...)
                         {
@@ -1223,9 +1269,14 @@ namespace winrt::PretClient::Downloader
                     }
                     if (javaExe.empty())
                     {
-                        fail(hstring{ L"No Java " } + to_hstring(game.javaMajor) +
-                            hstring{ L"+ found for the " } + kindName +
-                            hstring{ L" installer and auto-download failed. Check your connection or install a 64-bit Java manually." });
+                        if (game.javaMax > 0)
+                            fail(hstring{ L"This old version needs Java " } + to_hstring(game.javaMax) +
+                                hstring{ L" for the " } + kindName +
+                                hstring{ L" installer and auto-download failed. Check your connection or install a 64-bit Java 8 manually." });
+                        else
+                            fail(hstring{ L"No Java " } + to_hstring(game.javaMajor) +
+                                hstring{ L"+ found for the " } + kindName +
+                                hstring{ L" installer and auto-download failed. Check your connection or install a 64-bit Java manually." });
                         co_return;
                     }
                     try // the installer refuses to run without a profiles file
@@ -1272,6 +1323,9 @@ namespace winrt::PretClient::Downloader
                     log(kindName + hstring{ L" profile ready." });
                 }
             }
+            // Loader profile is final now: a launchwrapper entry point
+            // (old Forge) pins the whole launch to Java 8 here.
+            ApplyJavaRule(game);
 
             hstring clientUrl, clientSha1;
             long long clientSize = 0;

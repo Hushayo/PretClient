@@ -39,6 +39,10 @@ namespace winrt::PretClient::Downloader
         hstring cacheDir{}; // shared cache dir (libraries, assets, versions)
         std::vector<hstring> extraClasspath{}; // loader jars (maven + loader-only artifacts)
         int javaMajor = 8;
+        int javaMax = 0; // 0 = any newer Java OK; >0 = ceiling (legacy
+        // launchwrapper casts the app loader to URLClassLoader and dies on
+        // Java 9+, so those versions pin major == max == 8, like Mojang's
+        // jre-legacy runtime).
     };
 
     // Per-file progress: label, bytes done/total (total 0 when unknown), B/s.

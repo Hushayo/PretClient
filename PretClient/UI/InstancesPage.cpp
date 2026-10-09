@@ -2046,7 +2046,11 @@ namespace winrt::PretClient
             Refresh();
         };
 
-        SetStatus(hstring{ L"Locating Java " } + to_hstring(game.javaMajor) + L"+...");
+        bool legacyJava = (game.javaMax > 0);
+        if (legacyJava)
+            SetStatus(hstring{ L"Locating Java " } + to_hstring(game.javaMax) + L" (this old version needs Java 8)...");
+        else
+            SetStatus(hstring{ L"Locating Java " } + to_hstring(game.javaMajor) + L"+...");
         co_await winrt::resume_background();
         // Everything down to the foreground hop may block (disk copies,
         // java -version probes with long waits) and now runs off the UI.
@@ -2069,14 +2073,16 @@ namespace winrt::PretClient
         if (!javaExe.empty())
         {
             auto v = Java::Verify(javaExe);
-            if (v.major < game.javaMajor)
+            // Legacy launches also reject anything newer than the ceiling:
+            // launchwrapper 1.5 dies on Java 9+ (URLClassLoader cast).
+            if (v.major < game.javaMajor || (game.javaMax > 0 && v.major > game.javaMax))
                 javaExe = L"";
         }
         int pickedChecked = 0;
         int pickedBest = 0;
         if (javaExe.empty())
         {
-            auto picked = Java::PickDetailed(game.javaMajor);
+            auto picked = Java::PickCapped(game.javaMajor, game.javaMax);
             javaExe = picked.path;
             pickedChecked = picked.checked;
             pickedBest = picked.bestMajor;
@@ -2144,7 +2150,7 @@ namespace winrt::PretClient
             };
             try
             {
-                javaExe = co_await Java::EnsureAsync(game.javaMajor, uiLog, uiProg);
+                javaExe = co_await Java::EnsureAsync(game.javaMajor, uiLog, uiProg, game.javaMax);
             }
             catch (...)
             {
@@ -2157,8 +2163,15 @@ namespace winrt::PretClient
         m_downloads.erase(std::wstring{ id });
         if (javaExe.empty())
         {
-            wchar_t buf[400]{};
-            if (pickedBest > 0)
+            wchar_t buf[512]{};
+            if (game.javaMax > 0)
+            {
+                // Legacy versions pin to one Java train; "newest install" is
+                // meaningless when the ceiling excludes it.
+                swprintf_s(buf, L"This old version needs Java %d (checked %d install(s)). Auto-download failed - check your connection or install a 64-bit Java %d manually and set java.exe in Settings.",
+                    game.javaMax, pickedChecked, game.javaMax);
+            }
+            else if (pickedBest > 0)
                 swprintf_s(buf, L"No Java %d+ found and auto-download failed (checked %d install(s), newest is Java %d). Check your connection or install a 64-bit Java %d+ manually and set java.exe in Settings.",
                     game.javaMajor, pickedChecked, pickedBest, game.javaMajor);
             else
