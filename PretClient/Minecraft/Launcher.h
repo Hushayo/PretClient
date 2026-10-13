@@ -23,7 +23,7 @@ namespace winrt::PretClient::Launcher
 
     // Process sessions, keyed by instance id.
     bool Start(Command const& cmd, hstring const& instanceId, hstring& error,
-        bool highPriority = true, bool preferDedicatedGpu = true);
+        bool highPriority = false, bool preferDedicatedGpu = true);
     void Stop(hstring const& instanceId);
     bool IsRunning(hstring const& instanceId);
     void* RawHandle(hstring const& instanceId);

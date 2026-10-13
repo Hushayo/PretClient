@@ -86,7 +86,7 @@ namespace winrt::PretClient
                     return fb;
                 };
                 s.fpsBoost = getBool(L"fpsBoost", true);
-                s.highPriority = getBool(L"highPriority", true);
+                s.highPriority = getBool(L"highPriority", false);
             }
             catch (...)
             {

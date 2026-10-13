@@ -127,7 +127,7 @@ namespace winrt::PretClient
             m_fpsBoost.Content(box_value(L"FPS boost (tuned GC flags)"));
             body.Children().Append(m_fpsBoost);
 
-            m_highPriority.Content(box_value(L"Run game above-normal priority"));
+            m_highPriority.Content(box_value(L"Run game above-normal priority (can lag the system)"));
             body.Children().Append(m_highPriority);
             m_general.Children().Append(MakeCard(L"Performance", body));
         }
@@ -202,7 +202,7 @@ namespace winrt::PretClient
             s.maxMemMb = (idx >= 0 && idx < 4) ? mems[idx] : 2048;
             s.minMemMb = 512;
             s.fpsBoost = unbox_value_or<bool>(m_fpsBoost.IsChecked(), true);
-            s.highPriority = unbox_value_or<bool>(m_highPriority.IsChecked(), true);
+            s.highPriority = unbox_value_or<bool>(m_highPriority.IsChecked(), false);
             s.extraJvmArgs = m_extraJvm.Text();
             SaveSettings(s);
             SetStatus(L"Saved.");

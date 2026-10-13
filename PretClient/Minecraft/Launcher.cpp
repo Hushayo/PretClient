@@ -287,9 +287,14 @@ namespace winrt::PretClient::Launcher
                 break;
             }
         }
-        // FPS boost: tuned G1GC flags (Aikar-style) + user JVM overrides.
-        // Skips any flag the version/loader JSON already set; user args are
-        // appended last so they win on duplicates (HotSpot takes the last).
+        // FPS boost: lightweight G1GC flags. Skips any flag the
+        // version/loader JSON already set; user args are appended last so
+        // they win on duplicates (HotSpot takes the last). Deliberately NOT
+        // the full Aikar server set: AlwaysPreTouch stalls startup by
+        // touching the whole heap, InitiatingHeapOccupancyPercent=15 keeps
+        // the GC running constantly, and fixed G1 region/new-size tuning
+        // hurts small client heaps - all of that pegs the CPU and makes the
+        // whole system stutter, unlike the vanilla launcher defaults.
         if (fpsBoost)
         {
             auto hasPrefix = [&](std::wstring const& prefix) {
@@ -306,19 +311,7 @@ namespace winrt::PretClient::Launcher
                 L"-XX:+ParallelRefProcEnabled",
                 L"-XX:MaxGCPauseMillis=200",
                 L"-XX:+DisableExplicitGC",
-                L"-XX:+AlwaysPreTouch",
-                L"-XX:G1NewSizePercent=30",
-                L"-XX:G1MaxNewSizePercent=40",
-                L"-XX:G1HeapRegionSize=8M",
-                L"-XX:G1ReservePercent=20",
-                L"-XX:G1HeapWastePercent=5",
-                L"-XX:G1MixedGCCountTarget=4",
-                L"-XX:InitiatingHeapOccupancyPercent=15",
-                L"-XX:G1MixedGCLiveThresholdPercent=90",
-                L"-XX:G1RSetUpdatingPauseTimePercent=5",
-                L"-XX:SurvivorRatio=32",
                 L"-XX:+PerfDisableSharedMem",
-                L"-XX:MaxTenuringThreshold=1",
             };
             for (auto flag : boost)
             {
@@ -533,8 +526,11 @@ namespace winrt::PretClient::Launcher
             CloseHandle(pi.hThread);
             if (highPriority)
             {
-                // Above-normal (never High/Realtime: those can starve audio
-                // and the system). Plus opt out of EcoQoS power throttling.
+                // Explicit opt-in only (default off): above-normal lets a
+                // CPU-hungry game starve the rest of the system, which is why
+                // vanilla/other launchers stay at normal priority. Never
+                // High/Realtime: those can starve audio and the system.
+                // Plus opt out of EcoQoS power throttling.
                 SetPriorityClass(pi.hProcess, ABOVE_NORMAL_PRIORITY_CLASS);
 #ifdef PROCESS_POWER_THROTTLING_EXECUTION_SPEED
                 try
