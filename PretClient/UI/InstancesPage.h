@@ -26,7 +26,7 @@ namespace winrt::PretClient
     struct InstancesPage
     {
         InstancesPage();
-        Microsoft::UI::Xaml::Controls::StackPanel Root() const
+        Microsoft::UI::Xaml::Controls::Grid Root() const
         {
             return m_root;
         }
@@ -106,7 +106,8 @@ namespace winrt::PretClient
             Microsoft::UI::Xaml::Controls::ComboBox loaderBox,
             Microsoft::UI::Xaml::Controls::ComboBox loaderVerBox);
 
-        Microsoft::UI::Xaml::Controls::StackPanel m_root{};
+        Microsoft::UI::Xaml::Controls::Grid m_root{};
+        Microsoft::UI::Xaml::Controls::ScrollViewer m_scroll{};
         Microsoft::UI::Xaml::Controls::StackPanel m_cards{};
         Microsoft::UI::Xaml::Controls::TextBlock m_status{};
         std::function<void()> m_onProfileChanged{};

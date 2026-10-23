@@ -156,13 +156,19 @@ namespace winrt::PretClient
         head.Style(Application::Current().Resources().Lookup(box_value(L"TitleLargeTextBlockStyle")).as<Style>());
         m_inner.Children().Append(head);
 
-        // Explicit blue (not AccentButtonStyle: the app tints the accent
-        // ramp green, so accent would render green here).
+        TextBlock sub{};
+        sub.Text(L"Run Paper, Fabric, Forge and more on this PC - no external panel needed.");
+        sub.Style(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>());
+        sub.Opacity(0.6);
+        sub.TextWrapping(TextWrapping::Wrap);
+        m_inner.Children().Append(sub);
+
+        // Same brand accent as every other primary action; the old one-off
+        // blue was the only non-green control in the app.
         m_create.Content(box_value(L"Create a Server"));
-        m_create.Background(Media::SolidColorBrush{
-            Windows::UI::ColorHelper::FromArgb(0xFF, 0x00, 0x78, 0xD4) });
-        m_create.Foreground(Media::SolidColorBrush{
-            Windows::UI::ColorHelper::FromArgb(0xFF, 0xFF, 0xFF, 0xFF) });
+        m_create.Style(Application::Current().Resources().Lookup(box_value(L"AccentButtonStyle")).as<Style>());
+        m_create.MinWidth(150);
+        m_create.HorizontalAlignment(HorizontalAlignment::Left);
         m_create.Click([this](IInspectable const&, RoutedEventArgs const&) { OpenCreateDialog(); });
         m_inner.Children().Append(m_create);
 
@@ -175,9 +181,10 @@ namespace winrt::PretClient
 
         m_status.Opacity(0.7);
         m_status.TextWrapping(TextWrapping::Wrap);
+        m_status.Visibility(Visibility::Collapsed);
         m_inner.Children().Append(m_status);
 
-        m_servers.Spacing(8);
+        m_servers.Spacing(12);
         m_inner.Children().Append(m_servers);
 
         m_detail.Spacing(12);
@@ -232,6 +239,7 @@ namespace winrt::PretClient
         try
         {
             m_status.Text(line);
+            m_status.Visibility(line.empty() ? Visibility::Collapsed : Visibility::Visible);
         }
         catch (...)
         {
@@ -258,8 +266,10 @@ namespace winrt::PretClient
             if (m_detail.Visibility() == Visibility::Visible)
                 return; // detail view owns the page right now
             auto all = Server::AllSoftware();
+            bool any = false;
             for (auto const& s : Server::LoadServers())
             {
+                any = true;
                 hstring label = s.software;
                 for (auto const& a : all)
                 {
@@ -281,55 +291,117 @@ namespace winrt::PretClient
                 card.Padding(ThicknessHelper::FromUniformLength(16));
 
                 StackPanel col{};
-                col.Spacing(8);
+                col.Spacing(10);
 
-                StackPanel head{};
-                head.Orientation(Orientation::Horizontal);
-                head.Spacing(12);
-                head.VerticalAlignment(VerticalAlignment::Center);
+                Grid head{};
+                head.ColumnDefinitions().Append(ColumnDefinition{});
+                head.ColumnDefinitions().Append(ColumnDefinition{});
+                head.ColumnDefinitions().GetAt(0).Width(
+                    GridLengthHelper::FromValueAndType(1.0, GridUnitType::Star));
+                head.ColumnDefinitions().GetAt(1).Width(GridLengthHelper::Auto());
+
+                StackPanel ident{};
+                ident.Spacing(2);
                 TextBlock name{};
-                name.Text(shown + L"  -  " + label + L" " + s.mcVersion);
+                name.Text(shown);
+                name.Style(Application::Current().Resources().Lookup(box_value(L"SubtitleTextBlockStyle")).as<Style>());
                 name.FontWeight(Windows::UI::Text::FontWeights::SemiBold());
-                name.VerticalAlignment(VerticalAlignment::Center);
-                head.Children().Append(name);
+                name.TextTrimming(TextTrimming::CharacterEllipsis);
+                ident.Children().Append(name);
+                TextBlock meta{};
+                meta.Text(label + L" " + s.mcVersion);
+                meta.Style(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>());
+                meta.Opacity(0.6);
+                ident.Children().Append(meta);
+                Grid::SetColumn(ident, 0);
+                head.Children().Append(ident);
+
+                Border pill{};
+                pill.CornerRadius(CornerRadiusHelper::FromUniformRadius(10));
+                pill.Padding(ThicknessHelper::FromLengths(10, 4, 10, 4));
+                pill.Background(running ? Theme::PillRunningBackground() : Theme::PillIdleBackground());
+                pill.VerticalAlignment(VerticalAlignment::Top);
+                StackPanel pillInner{};
+                pillInner.Orientation(Orientation::Horizontal);
+                pillInner.Spacing(6);
+                pillInner.VerticalAlignment(VerticalAlignment::Center);
+                Microsoft::UI::Xaml::Shapes::Ellipse dot{};
+                dot.Width(8);
+                dot.Height(8);
+                dot.Fill(running ? Theme::RailRunningBrush() : Theme::RailIdleBrush());
+                dot.VerticalAlignment(VerticalAlignment::Center);
+                pillInner.Children().Append(dot);
                 TextBlock state{};
+                state.Style(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>());
                 state.Text(running ? L"Running" : L"Stopped");
-                state.Opacity(0.7);
+                state.Foreground(running
+                        ? Theme::PillRunningForeground().as<Microsoft::UI::Xaml::Media::Brush>()
+                        : Theme::DimBrush().as<Microsoft::UI::Xaml::Media::Brush>());
                 state.VerticalAlignment(VerticalAlignment::Center);
-                head.Children().Append(state);
+                pillInner.Children().Append(state);
+                pill.Child(pillInner);
+                Grid::SetColumn(pill, 1);
+                head.Children().Append(pill);
                 col.Children().Append(head);
 
-                StackPanel btns{};
-                btns.Orientation(Orientation::Horizontal);
-                btns.Spacing(8);
+                Border divider{};
+                divider.Height(1);
+                divider.Background(Theme::CardStroke());
+                divider.Opacity(0.7);
+                col.Children().Append(divider);
 
-                Button manage{};
-                manage.Content(box_value(L"Manage"));
-                manage.Click([this, id = s.id](IInspectable const&, RoutedEventArgs const&) {
-                    OpenDetail(id);
-                });
-                btns.Children().Append(manage);
+                Grid actionBar{};
+                actionBar.ColumnSpacing(12);
+                actionBar.ColumnDefinitions().Append(ColumnDefinition{});
+                actionBar.ColumnDefinitions().Append(ColumnDefinition{});
+                actionBar.ColumnDefinitions().GetAt(0).Width(
+                    GridLengthHelper::FromValueAndType(1.0, GridUnitType::Star));
+                actionBar.ColumnDefinitions().GetAt(1).Width(GridLengthHelper::Auto());
+
+                StackPanel runBtns{};
+                runBtns.Orientation(Orientation::Horizontal);
+                runBtns.Spacing(8);
+                runBtns.VerticalAlignment(VerticalAlignment::Center);
 
                 Button start{};
                 start.Content(box_value(L"Start"));
+                start.Style(Application::Current().Resources().Lookup(box_value(L"AccentButtonStyle")).as<Style>());
+                start.MinWidth(84);
                 start.IsEnabled(!running);
                 start.Click([this, id = s.id](IInspectable const&, RoutedEventArgs const&) {
                     StartServer(id);
                 });
-                btns.Children().Append(start);
+                runBtns.Children().Append(start);
 
                 Button stop{};
                 stop.Content(box_value(L"Stop"));
+                stop.MinWidth(84);
                 stop.IsEnabled(running);
                 stop.Click([this, id = s.id](IInspectable const&, RoutedEventArgs const&) {
                     Server::StopConsole(id);
                     SetStatus(L"Stopping...");
                     RefreshServers();
                 });
-                btns.Children().Append(stop);
+                runBtns.Children().Append(stop);
+                Grid::SetColumn(runBtns, 0);
+                actionBar.Children().Append(runBtns);
+
+                StackPanel manageBtns{};
+                manageBtns.Orientation(Orientation::Horizontal);
+                manageBtns.Spacing(8);
+                manageBtns.VerticalAlignment(VerticalAlignment::Center);
+
+                Button manage{};
+                manage.Content(box_value(L"Manage"));
+                manage.MinWidth(84);
+                manage.Click([this, id = s.id](IInspectable const&, RoutedEventArgs const&) {
+                    OpenDetail(id);
+                });
+                manageBtns.Children().Append(manage);
 
                 Button folder{};
                 folder.Content(box_value(L"Folder"));
+                folder.MinWidth(84);
                 folder.Click([this, dir](IInspectable const&, RoutedEventArgs const&) {
                     try
                     {
@@ -340,17 +412,47 @@ namespace winrt::PretClient
                     {
                     }
                 });
-                btns.Children().Append(folder);
+                manageBtns.Children().Append(folder);
                 Button del{};
                 del.Content(box_value(L"Delete"));
+                del.MinWidth(84);
                 del.Click([this, id = s.id](IInspectable const&, RoutedEventArgs const&) {
                     DeleteServer(id);
                 });
-                btns.Children().Append(del);
-                col.Children().Append(btns);
+                manageBtns.Children().Append(del);
+                Grid::SetColumn(manageBtns, 1);
+                actionBar.Children().Append(manageBtns);
+                col.Children().Append(actionBar);
 
                 card.Child(col);
                 m_servers.Children().Append(card);
+            }
+            if (!any)
+            {
+                Border empty{};
+                empty.Background(Theme::SubtleFillBrush());
+                empty.BorderBrush(Theme::CardStroke());
+                empty.BorderThickness(ThicknessHelper::FromUniformLength(1));
+                empty.CornerRadius(CornerRadiusHelper::FromUniformRadius(12));
+                empty.Padding(ThicknessHelper::FromUniformLength(28));
+                StackPanel col{};
+                col.Spacing(4);
+                col.HorizontalAlignment(HorizontalAlignment::Center);
+                TextBlock title{};
+                title.Text(L"No local servers yet");
+                title.Style(Application::Current().Resources().Lookup(box_value(L"SubtitleTextBlockStyle")).as<Style>());
+                title.FontWeight(Windows::UI::Text::FontWeights::SemiBold());
+                title.HorizontalAlignment(HorizontalAlignment::Center);
+                col.Children().Append(title);
+                TextBlock hint{};
+                hint.Text(L"Create one to run Paper, Fabric or Forge on this PC.");
+                hint.Style(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>());
+                hint.Opacity(0.6);
+                hint.TextWrapping(TextWrapping::Wrap);
+                hint.TextAlignment(TextAlignment::Center);
+                col.Children().Append(hint);
+                empty.Child(col);
+                m_servers.Children().Append(empty);
             }
         }
         catch (...)
@@ -1022,7 +1124,8 @@ namespace winrt::PretClient
             m_detail.Visibility(Visibility::Collapsed);
             m_create.Visibility(Visibility::Visible);
             m_progress.Visibility(m_working ? Visibility::Visible : Visibility::Collapsed);
-            m_status.Visibility(Visibility::Visible);
+            m_status.Visibility(m_status.Text().empty() ? Visibility::Collapsed
+                                                        : Visibility::Visible);
             m_servers.Visibility(Visibility::Visible);
         }
         catch (...)
@@ -1073,17 +1176,28 @@ namespace winrt::PretClient
             headCol.Spacing(8);
             StackPanel titleRow{};
             titleRow.Orientation(Orientation::Horizontal);
-            titleRow.Spacing(8);
+            titleRow.Spacing(12);
             Button back{};
-            back.Content(box_value(L"< Back"));
+            back.Content(box_value(L"Back"));
+            back.MinWidth(72);
+            back.VerticalAlignment(VerticalAlignment::Center);
             back.Click([this](IInspectable const&, RoutedEventArgs const&) { ShowList(); });
             titleRow.Children().Append(back);
+            StackPanel titleStack{};
+            titleStack.Spacing(2);
+            titleStack.VerticalAlignment(VerticalAlignment::Center);
             TextBlock title{};
-            title.Text(shown + L"  -  " + label + L" " + entry.mcVersion);
+            title.Text(shown);
             title.Style(Application::Current().Resources().Lookup(box_value(L"SubtitleTextBlockStyle")).as<Style>());
-            title.VerticalAlignment(VerticalAlignment::Center);
+            title.FontWeight(Windows::UI::Text::FontWeights::SemiBold());
             title.TextWrapping(TextWrapping::Wrap);
-            titleRow.Children().Append(title);
+            titleStack.Children().Append(title);
+            TextBlock titleMeta{};
+            titleMeta.Text(label + L" " + entry.mcVersion);
+            titleMeta.Style(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>());
+            titleMeta.Opacity(0.6);
+            titleStack.Children().Append(titleMeta);
+            titleRow.Children().Append(titleStack);
             headCol.Children().Append(titleRow);
 
             m_dStatus = TextBlock{};
@@ -1096,12 +1210,15 @@ namespace winrt::PretClient
             btns.Spacing(8);
             m_dStart = Button{};
             m_dStart.Content(box_value(L"Start"));
+            m_dStart.Style(Application::Current().Resources().Lookup(box_value(L"AccentButtonStyle")).as<Style>());
+            m_dStart.MinWidth(84);
             m_dStart.Click([this](IInspectable const&, RoutedEventArgs const&) {
                 StartServer(m_detailId);
             });
             btns.Children().Append(m_dStart);
             m_dStop = Button{};
             m_dStop.Content(box_value(L"Stop"));
+            m_dStop.MinWidth(84);
             m_dStop.Click([this](IInspectable const&, RoutedEventArgs const&) {
                 Server::StopConsole(m_detailId);
                 m_dStatus.Text(L"Stopping...");
@@ -1109,6 +1226,7 @@ namespace winrt::PretClient
             btns.Children().Append(m_dStop);
             Button folder{};
             folder.Content(box_value(L"Folder"));
+            folder.MinWidth(84);
             folder.Click([dir](IInspectable const&, RoutedEventArgs const&) {
                 try
                 {
@@ -1121,6 +1239,7 @@ namespace winrt::PretClient
             btns.Children().Append(folder);
             Button del{};
             del.Content(box_value(L"Delete"));
+            del.MinWidth(84);
             del.Click([this](IInspectable const&, RoutedEventArgs const&) {
                 DeleteServer(m_detailId);
             });
@@ -1143,6 +1262,9 @@ namespace winrt::PretClient
             m_dLog.AcceptsReturn(true);
             m_dLog.TextWrapping(TextWrapping::Wrap);
             m_dLog.FontFamily(Media::FontFamily{ L"Consolas" });
+            m_dLog.FontSize(12);
+            m_dLog.Padding(ThicknessHelper::FromUniformLength(8));
+            m_dLog.CornerRadius(CornerRadiusHelper::FromUniformRadius(8));
             m_dLog.Background(Theme::LogBackgroundBrush());
             m_dScroll.Content(m_dLog);
             conCol.Children().Append(m_dScroll);

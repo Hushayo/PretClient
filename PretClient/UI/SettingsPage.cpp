@@ -25,6 +25,7 @@ namespace winrt::PretClient
             TextBlock head{};
             head.Text(title);
             head.Style(Application::Current().Resources().Lookup(box_value(L"SubtitleTextBlockStyle")).as<Style>());
+            head.FontSize(16);
             head.FontWeight(Windows::UI::Text::FontWeights::SemiBold());
 
             StackPanel wrap{};
@@ -36,7 +37,7 @@ namespace winrt::PretClient
             card.Background(Theme::CardBrush());
             card.BorderBrush(Theme::CardStroke());
             card.BorderThickness(ThicknessHelper::FromUniformLength(1));
-            card.CornerRadius(CornerRadiusHelper::FromUniformRadius(8));
+            card.CornerRadius(CornerRadiusHelper::FromUniformRadius(12));
             card.Padding(ThicknessHelper::FromUniformLength(16));
             card.HorizontalAlignment(HorizontalAlignment::Stretch);
             card.Child(wrap);
@@ -60,7 +61,7 @@ namespace winrt::PretClient
         m_inner.Children().Append(head);
 
         TextBlock sub{};
-        sub.Text(L"Profile, folders, performance and updates. Java + API key live under Advanced.");
+        sub.Text(L"Profile, folders and performance. Java and API access live under Advanced.");
         sub.Style(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>());
         sub.Opacity(0.6);
         sub.TextWrapping(TextWrapping::Wrap);
@@ -97,17 +98,23 @@ namespace winrt::PretClient
         {
             StackPanel body{};
             body.Spacing(8);
-            m_gameDir.Header(box_value(L"Game folder (roaming .minecraft)"));
             m_gameDir.HorizontalAlignment(HorizontalAlignment::Stretch);
             body.Children().Append(m_gameDir);
 
             Button def{};
-            def.Content(box_value(L"Use default roaming folder"));
+            def.Content(box_value(L"Use default folder"));
             def.HorizontalAlignment(HorizontalAlignment::Left);
             def.Click([this](IInspectable const&, RoutedEventArgs const&) {
                 m_gameDir.Text(hstring{ Paths::DefaultGameDir().wstring() });
             });
             body.Children().Append(def);
+
+            TextBlock folderHint{};
+            folderHint.Text(L"Defaults to %APPDATA%\\.minecraft.");
+            folderHint.Style(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>());
+            folderHint.Opacity(0.6);
+            folderHint.TextWrapping(TextWrapping::Wrap);
+            body.Children().Append(folderHint);
             m_general.Children().Append(MakeCard(L"Game folder", body));
         }
 
@@ -212,6 +219,7 @@ namespace winrt::PretClient
 
         m_status.Opacity(0.7);
         m_status.TextWrapping(TextWrapping::Wrap);
+        m_status.Visibility(Visibility::Collapsed);
         m_inner.Children().Append(m_status);
 
         // Updates card: Grid row (version star + button auto) so the button
@@ -332,6 +340,7 @@ namespace winrt::PretClient
     void SettingsPage::SetStatus(hstring const& line)
     {
         m_status.Text(line);
+        m_status.Visibility(line.empty() ? Visibility::Collapsed : Visibility::Visible);
     }
 
     winrt::fire_and_forget SettingsPage::DownloadJava()

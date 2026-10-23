@@ -27,6 +27,29 @@ namespace winrt::PretClient::Theme
         put(L"SystemAccentColorDark1", Windows::UI::ColorHelper::FromArgb(0xFF, 0x37, 0x9E, 0x29));
         put(L"SystemAccentColorDark2", Windows::UI::ColorHelper::FromArgb(0xFF, 0x2B, 0x7A, 0x20));
         put(L"SystemAccentColorDark3", Windows::UI::ColorHelper::FromArgb(0xFF, 0x1F, 0x5C, 0x18));
+
+        // The stock accent-button brush is Light2 of the accent ramp, which
+        // reads as washed-out mint next to the saturated brand green. Pin
+        // the button states to the brand color so primary actions match the
+        // loader badges and status dots instead of looking disabled.
+        auto putBrush = [&](wchar_t const* key, Windows::UI::Color color) {
+            res.Insert(winrt::box_value(key),
+                winrt::box_value(Media::SolidColorBrush{ color }));
+        };
+        auto ink = Windows::UI::ColorHelper::FromArgb(0xFF, 0x08, 0x14, 0x0A);
+        putBrush(L"AccentButtonBackground", AccentBase());
+        putBrush(L"AccentButtonBackgroundPointerOver",
+            Windows::UI::ColorHelper::FromArgb(0xFF, 0x53, 0xCC, 0x40));
+        putBrush(L"AccentButtonBackgroundPressed",
+            Windows::UI::ColorHelper::FromArgb(0xFF, 0x36, 0x9E, 0x27));
+        putBrush(L"AccentButtonBorderBrush", AccentBase());
+        putBrush(L"AccentButtonBorderBrushPointerOver",
+            Windows::UI::ColorHelper::FromArgb(0xFF, 0x53, 0xCC, 0x40));
+        putBrush(L"AccentButtonBorderBrushPressed",
+            Windows::UI::ColorHelper::FromArgb(0xFF, 0x36, 0x9E, 0x27));
+        putBrush(L"AccentButtonForeground", ink);
+        putBrush(L"AccentButtonForegroundPointerOver", ink);
+        putBrush(L"AccentButtonForegroundPressed", ink);
     }
 
     inline Microsoft::UI::Xaml::Media::Brush CardBrush()

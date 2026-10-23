@@ -110,30 +110,56 @@ namespace winrt::PretClient
 
     InstancesPage::InstancesPage()
     {
-        m_root.Spacing(12);
+        // Header stays put; the card list owns the remaining height and
+        // scrolls, so instances below the fold are always reachable.
         m_root.Padding(ThicknessHelper::FromUniformLength(24));
+        m_root.RowDefinitions().Append(RowDefinition{});
+        m_root.RowDefinitions().Append(RowDefinition{});
+        m_root.RowDefinitions().GetAt(0).Height(GridLengthHelper::Auto());
+        m_root.RowDefinitions().GetAt(1).Height(
+            GridLengthHelper::FromValueAndType(1.0, GridUnitType::Star));
+
+        StackPanel header{};
+        header.Spacing(8);
 
         TextBlock head{};
         head.Text(L"Instances");
         head.Style(Application::Current().Resources().Lookup(box_value(L"TitleLargeTextBlockStyle")).as<Style>());
-        m_root.Children().Append(head);
+        header.Children().Append(head);
 
-        StackPanel topRow{};
-        topRow.Orientation(Orientation::Horizontal);
-        topRow.Spacing(8);
+        TextBlock sub{};
+        sub.Text(L"One isolated game folder per setup - worlds, mods and logs never mix.");
+        sub.Style(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>());
+        sub.Opacity(0.6);
+        sub.TextWrapping(TextWrapping::Wrap);
+        header.Children().Append(sub);
 
         Button add{};
-        add.Content(box_value(L"+ New instance"));
+        add.Content(box_value(L"New instance"));
+        add.Style(Application::Current().Resources().Lookup(box_value(L"AccentButtonStyle")).as<Style>());
+        add.MinWidth(132);
+        add.HorizontalAlignment(HorizontalAlignment::Left);
         add.Click([this](IInspectable const&, RoutedEventArgs const&) { AddDialog(); });
-        topRow.Children().Append(add);
-        m_root.Children().Append(topRow);
+        header.Children().Append(add);
 
         m_status.Opacity(0.7);
         m_status.TextWrapping(TextWrapping::Wrap);
-        m_root.Children().Append(m_status);
+        m_status.Visibility(Visibility::Collapsed);
+        header.Children().Append(m_status);
 
-        m_root.Children().Append(m_cards);
+        Grid::SetRow(header, 0);
+        m_root.Children().Append(header);
+
+        m_scroll.Content(m_cards);
+        m_scroll.VerticalScrollBarVisibility(ScrollBarVisibility::Auto);
+        m_scroll.HorizontalScrollBarVisibility(ScrollBarVisibility::Disabled);
+        m_scroll.HorizontalScrollMode(ScrollMode::Disabled);
+        m_scroll.ZoomMode(ZoomMode::Disabled);
+        Grid::SetRow(m_scroll, 1);
+        m_root.Children().Append(m_scroll);
+
         m_cards.Spacing(12);
+        m_cards.Padding(ThicknessHelper::FromLengths(0, 0, 0, 24));
 
         m_dispatcher = Microsoft::UI::Dispatching::DispatcherQueue::GetForCurrentThread();
         m_timer = m_dispatcher.CreateTimer();
@@ -157,6 +183,9 @@ namespace winrt::PretClient
     void InstancesPage::SetStatus(hstring const& line)
     {
         m_status.Text(line);
+        // Empty status lines leave a dead gap under the header; hide the
+        // block until there is something to say.
+        m_status.Visibility(line.empty() ? Visibility::Collapsed : Visibility::Visible);
     }
 
     void InstancesPage::Refresh()
@@ -249,11 +278,6 @@ namespace winrt::PretClient
             shell.Children().Append(body);
 
             Grid head{};
-            head.ColumnSpacing(16);
-            head.ColumnDefinitions().Append(ColumnDefinition{});
-            head.ColumnDefinitions().Append(ColumnDefinition{});
-            head.ColumnDefinitions().GetAt(0).Width(GridLengthHelper::FromValueAndType(1.0, GridUnitType::Star));
-            head.ColumnDefinitions().GetAt(1).Width(GridLengthHelper::Auto());
 
             // Identity: game-icon tile + name stack.
             StackPanel identity{};
@@ -439,7 +463,6 @@ namespace winrt::PretClient
             nameCol.Children().Append(metaRow);
 
             identity.Children().Append(nameCol);
-            Grid::SetColumn(identity, 0);
             head.Children().Append(identity);
 
             body.Children().Append(head);
@@ -478,21 +501,30 @@ namespace winrt::PretClient
             gamelog.Header(box_value(L"Client log"));
             body.Children().Append(gamelog);
 
-            StackPanel buttons{};
-            buttons.Orientation(Orientation::Horizontal);
-            buttons.Spacing(8);
-            buttons.VerticalAlignment(VerticalAlignment::Center);
+            // Actions live in a footer bar, not beside the name: seven
+            // buttons next to the title squeezed the version text and ran
+            // off the right edge of the card.
+            StackPanel primary{};
+            primary.Orientation(Orientation::Horizontal);
+            primary.Spacing(8);
+            primary.VerticalAlignment(VerticalAlignment::Center);
+
+            StackPanel secondary{};
+            secondary.Orientation(Orientation::Horizontal);
+            secondary.Spacing(8);
+            secondary.VerticalAlignment(VerticalAlignment::Center);
 
             hstring id = inst.id;
             Button play{};
             play.Content(box_value(L"Play"));
             play.Style(Application::Current().Resources().Lookup(box_value(L"AccentButtonStyle")).as<Style>());
-            play.MinWidth(88);
+            play.MinWidth(84);
             play.IsEnabled(!running && !preparing);
             play.Click([this, id](IInspectable const&, RoutedEventArgs const&) { PlayInstance(id); });
 
             Button stop{};
             stop.Content(box_value(L"Stop"));
+            stop.MinWidth(84);
             stop.IsEnabled(running);
             stop.Click([this, id](IInspectable const&, RoutedEventArgs const&) {
                 Launcher::Stop(id);
@@ -502,17 +534,19 @@ namespace winrt::PretClient
 
             Button restart{};
             restart.Content(box_value(L"Restart"));
+            restart.MinWidth(84);
             restart.IsEnabled(running && !preparing);
             restart.Click([this, id](IInspectable const&, RoutedEventArgs const&) {
                 RestartInstance(id);
             });
-            buttons.Children().Append(play);
-            buttons.Children().Append(stop);
-            buttons.Children().Append(restart);
+            primary.Children().Append(play);
+            primary.Children().Append(stop);
+            primary.Children().Append(restart);
 
             Button logBtn{};
             bool logOpen = m_logOpen.find(std::wstring{ id }) != m_logOpen.end();
-            logBtn.Content(box_value(logOpen ? L"Hide Log" : L"Log"));
+            logBtn.Content(box_value(logOpen ? L"Hide log" : L"Log"));
+            logBtn.MinWidth(72);
             logBtn.Click([this, id](IInspectable const&, RoutedEventArgs const&) {
                 try
                 {
@@ -531,7 +565,7 @@ namespace winrt::PretClient
                     if (!card)
                         return;
                     if (card->logBtn)
-                        card->logBtn.Content(box_value(open ? L"Hide Log" : L"Log"));
+                        card->logBtn.Content(box_value(open ? L"Hide log" : L"Log"));
                     if (!card->gamelog)
                         return;
                     if (!open)
@@ -564,23 +598,27 @@ namespace winrt::PretClient
                 {
                 }
             });
-            buttons.Children().Append(logBtn);
+            secondary.Children().Append(logBtn);
 
             if (isModded)
             {
                 Button modsBtn{};
                 modsBtn.Content(box_value(L"Mods"));
+                modsBtn.MinWidth(72);
                 modsBtn.Click([this, id](IInspectable const&, RoutedEventArgs const&) { ModsDialog(id); });
-                buttons.Children().Append(modsBtn);
+                secondary.Children().Append(modsBtn);
             }
 
             Button packsBtn{};
-            packsBtn.Content(box_value(L"Resource Packs"));
+            packsBtn.Content(box_value(L"Packs"));
+            packsBtn.MinWidth(72);
+            ToolTipService::SetToolTip(packsBtn, box_value(L"Resource packs"));
             packsBtn.Click([this, id](IInspectable const&, RoutedEventArgs const&) { ResourcePacksDialog(id); });
-            buttons.Children().Append(packsBtn);
+            secondary.Children().Append(packsBtn);
 
             Button del{};
             del.Content(box_value(L"Delete"));
+            del.MinWidth(76);
             del.IsEnabled(!running && !preparing);
             del.Click([this, id](IInspectable const&, RoutedEventArgs const&) {
                 if (m_preparing.find(std::wstring{ id }) != m_preparing.end() ||
@@ -608,9 +646,27 @@ namespace winrt::PretClient
                 SetStatus(L"Instance deleted.");
                 Refresh();
             });
-            buttons.Children().Append(del);
-            Grid::SetColumn(buttons, 1);
-            head.Children().Append(buttons);
+            secondary.Children().Append(del);
+
+            Border divider{};
+            divider.Height(1);
+            divider.Background(Theme::CardStroke());
+            divider.Margin(ThicknessHelper::FromLengths(0, 4, 0, 0));
+            divider.Opacity(0.7);
+            body.Children().Append(divider);
+
+            Grid actionBar{};
+            actionBar.ColumnSpacing(12);
+            actionBar.ColumnDefinitions().Append(ColumnDefinition{});
+            actionBar.ColumnDefinitions().Append(ColumnDefinition{});
+            actionBar.ColumnDefinitions().GetAt(0).Width(
+                GridLengthHelper::FromValueAndType(1.0, GridUnitType::Star));
+            actionBar.ColumnDefinitions().GetAt(1).Width(GridLengthHelper::Auto());
+            Grid::SetColumn(primary, 0);
+            Grid::SetColumn(secondary, 1);
+            actionBar.Children().Append(primary);
+            actionBar.Children().Append(secondary);
+            body.Children().Append(actionBar);
 
             card.Child(shell);
             m_cards.Children().Append(card);
@@ -658,6 +714,35 @@ namespace winrt::PretClient
                 PaintProgress(back, dit->second.label, dit->second.done,
                     dit->second.total, dit->second.bps);
             }
+        }
+        if (instances.empty())
+        {
+            Border empty{};
+            empty.Background(Theme::SubtleFillBrush());
+            empty.BorderBrush(Theme::CardStroke());
+            empty.BorderThickness(ThicknessHelper::FromUniformLength(1));
+            empty.CornerRadius(CornerRadiusHelper::FromUniformRadius(12));
+            empty.Padding(ThicknessHelper::FromUniformLength(28));
+
+            StackPanel col{};
+            col.Spacing(4);
+            col.HorizontalAlignment(HorizontalAlignment::Center);
+            TextBlock title{};
+            title.Text(L"No instances yet");
+            title.Style(Application::Current().Resources().Lookup(box_value(L"SubtitleTextBlockStyle")).as<Style>());
+            title.FontWeight(Windows::UI::Text::FontWeights::SemiBold());
+            title.HorizontalAlignment(HorizontalAlignment::Center);
+            col.Children().Append(title);
+            TextBlock hint{};
+            hint.Text(L"Create one to pick a Minecraft version and loader. Everything stays in its own folder.");
+            hint.Style(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>());
+            hint.Opacity(0.6);
+            hint.TextWrapping(TextWrapping::Wrap);
+            hint.TextAlignment(TextAlignment::Center);
+            hint.MaxWidth(460);
+            col.Children().Append(hint);
+            empty.Child(col);
+            m_cards.Children().Append(empty);
         }
         UpdateStatsAsync();
     }

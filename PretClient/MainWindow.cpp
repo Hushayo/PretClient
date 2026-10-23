@@ -130,8 +130,6 @@ namespace winrt::PretClient
         nav.MenuItems().Append(m_navLocalServer);
         nav.MenuItems().Append(m_navSettings);
 
-        nav.PaneTitle(L"PretClient");
-
         nav.Content(m_host);
         nav.SelectionChanged([this](NavigationView const&, NavigationViewSelectionChangedEventArgs const& args) {
             hstring tag;

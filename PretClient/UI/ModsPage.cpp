@@ -18,52 +18,103 @@ using namespace Windows::Foundation;
 
 namespace winrt::PretClient
 {
+    namespace
+    {
+        // "downloads 28610903 | fabric-api" is developer output, not UI.
+        hstring DownloadCount(long long n)
+        {
+            wchar_t buf[64]{};
+            if (n >= 1000000)
+                swprintf_s(buf, L"%.1fM downloads", static_cast<double>(n) / 1000000.0);
+            else if (n >= 1000)
+                swprintf_s(buf, L"%.1fK downloads", static_cast<double>(n) / 1000.0);
+            else
+                swprintf_s(buf, L"%lld downloads", n);
+            return hstring{ buf };
+        }
+    } // namespace
+
     ModsPage::ModsPage()
     {
-        m_root.Spacing(12);
+        // Fixed header + star-sized result list: the old fixed MaxHeight
+        // pushed the bottom of the results below the window on short screens.
         m_root.Padding(ThicknessHelper::FromUniformLength(24));
+        m_root.RowDefinitions().Append(RowDefinition{});
+        m_root.RowDefinitions().Append(RowDefinition{});
+        m_root.RowDefinitions().GetAt(0).Height(GridLengthHelper::Auto());
+        m_root.RowDefinitions().GetAt(1).Height(
+            GridLengthHelper::FromValueAndType(1.0, GridUnitType::Star));
+
+        StackPanel top{};
+        top.Spacing(10);
 
         TextBlock head{};
-        head.Text(L"Mods - Modrinth");
+        head.Text(L"Mods");
         head.Style(Application::Current().Resources().Lookup(box_value(L"TitleLargeTextBlockStyle")).as<Style>());
-        m_root.Children().Append(head);
+        top.Children().Append(head);
         m_head = head;
 
-        // Content tabs (Mods | Resource Packs) above the source tabs
-        // (Modrinth | CurseForge): the active tab reads as the accent
-        // button, the other as a plain button.
+        TextBlock sub{};
+        sub.Text(L"Browse Modrinth or CurseForge and install straight into an instance.");
+        sub.Style(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>());
+        sub.Opacity(0.6);
+        sub.TextWrapping(TextWrapping::Wrap);
+        top.Children().Append(sub);
+
+        // Content and source tabs share one row: four stacked buttons spent
+        // a whole row of vertical space and read as two unrelated toolbars.
+        Grid tabRow{};
+        tabRow.ColumnDefinitions().Append(ColumnDefinition{});
+        tabRow.ColumnDefinitions().Append(ColumnDefinition{});
+        tabRow.ColumnDefinitions().GetAt(0).Width(
+            GridLengthHelper::FromValueAndType(1.0, GridUnitType::Star));
+        tabRow.ColumnDefinitions().GetAt(1).Width(GridLengthHelper::Auto());
+
         StackPanel kindTabs{};
         kindTabs.Orientation(Orientation::Horizontal);
         kindTabs.Spacing(8);
         m_tabMods.Content(box_value(L"Mods"));
         m_tabPacks.Content(box_value(L"Resource Packs"));
+        m_tabMods.MinWidth(96);
+        m_tabPacks.MinWidth(96);
         m_tabMods.Click([this](IInspectable const&, RoutedEventArgs const&) { SetKind(Kind::Mods); });
         m_tabPacks.Click([this](IInspectable const&, RoutedEventArgs const&) { SetKind(Kind::Packs); });
         kindTabs.Children().Append(m_tabMods);
         kindTabs.Children().Append(m_tabPacks);
-        m_root.Children().Append(kindTabs);
+        Grid::SetColumn(kindTabs, 0);
+        tabRow.Children().Append(kindTabs);
 
-        // Source tabs (Modrinth | CurseForge).
         StackPanel tabs{};
         tabs.Orientation(Orientation::Horizontal);
         tabs.Spacing(8);
+        tabs.HorizontalAlignment(HorizontalAlignment::Right);
         m_tabModrinth.Content(box_value(L"Modrinth"));
         m_tabCurse.Content(box_value(L"CurseForge"));
+        m_tabModrinth.MinWidth(96);
+        m_tabCurse.MinWidth(96);
         m_tabModrinth.Click([this](IInspectable const&, RoutedEventArgs const&) { SetSource(Source::Modrinth); });
         m_tabCurse.Click([this](IInspectable const&, RoutedEventArgs const&) { SetSource(Source::CurseForge); });
         tabs.Children().Append(m_tabModrinth);
         tabs.Children().Append(m_tabCurse);
-        m_root.Children().Append(tabs);
+        Grid::SetColumn(tabs, 1);
+        tabRow.Children().Append(tabs);
+        top.Children().Append(tabRow);
         PaintKindTabs();
         PaintSourceTabs();
 
-        StackPanel row{};
-        row.Orientation(Orientation::Horizontal);
-        row.Spacing(8);
+        Grid filters{};
+        filters.ColumnSpacing(8);
+        for (int i = 0; i < 4; ++i)
+            filters.ColumnDefinitions().Append(ColumnDefinition{});
+        filters.ColumnDefinitions().GetAt(0).Width(
+            GridLengthHelper::FromValueAndType(1.0, GridUnitType::Star));
+        for (int i = 1; i < 4; ++i)
+            filters.ColumnDefinitions().GetAt(i).Width(GridLengthHelper::Auto());
 
         m_query.PlaceholderText(L"Search mods... (e.g. sodium)");
-        m_query.Width(280);
-        row.Children().Append(m_query);
+        m_query.MinWidth(220);
+        Grid::SetColumn(m_query, 0);
+        filters.Children().Append(m_query);
 
         m_loader.Items().Append(box_value(L"all"));
         m_loader.Items().Append(box_value(L"fabric"));
@@ -71,22 +122,27 @@ namespace winrt::PretClient
         m_loader.Items().Append(box_value(L"quilt"));
         m_loader.Items().Append(box_value(L"neoforge"));
         m_loader.SelectedIndex(0);
-        row.Children().Append(m_loader);
+        m_loader.MinWidth(112);
+        Grid::SetColumn(m_loader, 1);
+        filters.Children().Append(m_loader);
 
         // MC version is automatic from the target instance (read-only): the
         // list only ever shows mods matching that version.
         m_mc.PlaceholderText(L"Auto (instance)");
         m_mc.IsReadOnly(true);
         m_mc.IsEnabled(false);
-        m_mc.Width(140);
-        row.Children().Append(m_mc);
+        m_mc.MinWidth(112);
+        Grid::SetColumn(m_mc, 2);
+        filters.Children().Append(m_mc);
 
         Button go{};
         go.Content(box_value(L"Search"));
         go.Style(Application::Current().Resources().Lookup(box_value(L"AccentButtonStyle")).as<Style>());
+        go.MinWidth(88);
         go.Click([this](IInspectable const&, RoutedEventArgs const&) { OnSearch(); });
-        row.Children().Append(go);
-        m_root.Children().Append(row);
+        Grid::SetColumn(go, 3);
+        filters.Children().Append(go);
+        top.Children().Append(filters);
 
         StackPanel targetRow{};
         targetRow.Orientation(Orientation::Horizontal);
@@ -95,15 +151,23 @@ namespace winrt::PretClient
         tl.Text(L"Install to:");
         tl.VerticalAlignment(VerticalAlignment::Center);
         targetRow.Children().Append(tl);
+        m_target.MinWidth(280);
         targetRow.Children().Append(m_target);
-        m_root.Children().Append(targetRow);
+        top.Children().Append(targetRow);
 
         m_status.Opacity(0.7);
         m_status.TextWrapping(TextWrapping::Wrap);
-        m_root.Children().Append(m_status);
+        m_status.Visibility(Visibility::Collapsed);
+        top.Children().Append(m_status);
 
-        m_scroll.MaxHeight(560);
+        Grid::SetRow(top, 0);
+        m_root.Children().Append(top);
+
         m_scroll.Content(m_results);
+        m_scroll.VerticalScrollBarVisibility(ScrollBarVisibility::Auto);
+        m_scroll.HorizontalScrollBarVisibility(ScrollBarVisibility::Disabled);
+        m_scroll.HorizontalScrollMode(ScrollMode::Disabled);
+        m_scroll.ZoomMode(ZoomMode::Disabled);
         m_scroll.ViewChanged([this](IInspectable const&, ScrollViewerViewChangedEventArgs const&) {
             try
             {
@@ -117,6 +181,8 @@ namespace winrt::PretClient
             }
         });
         m_results.Spacing(8);
+        m_results.Padding(ThicknessHelper::FromLengths(0, 0, 0, 24));
+        Grid::SetRow(m_scroll, 1);
         m_root.Children().Append(m_scroll);
 
         // Live search: typing filters without needing the Search button.
@@ -283,6 +349,7 @@ namespace winrt::PretClient
     void ModsPage::SetStatus(hstring const& line)
     {
         m_status.Text(line);
+        m_status.Visibility(line.empty() ? Visibility::Collapsed : Visibility::Visible);
     }
 
     fire_and_forget ModsPage::OnSearch()
@@ -373,11 +440,10 @@ namespace winrt::PretClient
         try
         {
             bool packs = (m_kind == Kind::Packs);
-            bool cf = (m_source == Source::CurseForge);
+            // The source tab right below already says Modrinth/CurseForge;
+            // repeating it in the title was pure noise.
             if (m_head)
-                m_head.Text(packs
-                    ? (cf ? L"Resource Packs - CurseForge" : L"Resource Packs - Modrinth")
-                    : (cf ? L"Mods - CurseForge" : L"Mods - Modrinth"));
+                m_head.Text(packs ? L"Resource Packs" : L"Mods");
             if (m_query)
                 m_query.PlaceholderText(packs
                     ? L"Search resource packs..."
@@ -395,8 +461,8 @@ namespace winrt::PretClient
         card.Background(Theme::CardBrush());
         card.BorderBrush(Theme::CardStroke());
         card.BorderThickness(ThicknessHelper::FromUniformLength(1));
-        card.CornerRadius(CornerRadiusHelper::FromUniformRadius(8));
-        card.Padding(ThicknessHelper::FromUniformLength(12));
+        card.CornerRadius(CornerRadiusHelper::FromUniformRadius(12));
+        card.Padding(ThicknessHelper::FromUniformLength(14));
 
         Grid grid{};
         grid.ColumnSpacing(12);
@@ -410,8 +476,8 @@ namespace winrt::PretClient
         head.Spacing(10);
 
         Image icon{};
-        icon.Width(48);
-        icon.Height(48);
+        icon.Width(44);
+        icon.Height(44);
         icon.Stretch(Stretch::Uniform);
         if (!iconUrl.empty())
             LoadIcon(iconUrl, icon);
@@ -422,7 +488,8 @@ namespace winrt::PretClient
         head.Children().Append(info);
         TextBlock titleBlock{};
         titleBlock.Text(title);
-        titleBlock.Style(Application::Current().Resources().Lookup(box_value(L"SubtitleTextBlockStyle")).as<Style>());
+        titleBlock.Style(Application::Current().Resources().Lookup(box_value(L"BodyStrongTextBlockStyle")).as<Style>());
+        titleBlock.FontSize(16);
         info.Children().Append(titleBlock);
         TextBlock descBlock{};
         descBlock.Text(desc);
@@ -441,6 +508,8 @@ namespace winrt::PretClient
         actions.VerticalAlignment(VerticalAlignment::Center);
         Button install{};
         install.Content(box_value(L"Install"));
+        install.Style(Application::Current().Resources().Lookup(box_value(L"AccentButtonStyle")).as<Style>());
+        install.MinWidth(84);
         install.Click([onInstall](IInspectable const&, RoutedEventArgs const&) {
             if (onInstall)
                 onInstall();
@@ -448,6 +517,7 @@ namespace winrt::PretClient
         actions.Children().Append(install);
         Button builds{};
         builds.Content(box_value(L"Builds"));
+        builds.MinWidth(84);
         builds.Click([onBuilds](IInspectable const&, RoutedEventArgs const&) {
             if (onBuilds)
                 onBuilds();
@@ -487,7 +557,7 @@ namespace winrt::PretClient
                     m_loading = false;
                     if (result.hits.empty() && m_offset == 0)
                     {
-                        SetStatus(L"No results (check the query, key, or offline?).");
+                        SetStatus(L"No matching results. Try a broader search or check your connection.");
                         return;
                     }
                     m_total = result.total;
@@ -497,15 +567,14 @@ namespace winrt::PretClient
                     if (!m_lastLoader.empty() && m_lastLoader != L"all")
                         filter += L" " + std::wstring{ m_lastLoader };
                     if (m_total > 0)
-                        swprintf_s(buf, L"%d of %lld results%s (scroll for more).", m_offset, m_total, filter.c_str());
+                        swprintf_s(buf, L"Showing %d of %lld%s", m_offset, m_total, filter.c_str());
                     else
-                        swprintf_s(buf, L"%d result(s)%s.", m_offset, filter.c_str());
+                        swprintf_s(buf, L"%d result(s)%s", m_offset, filter.c_str());
                     SetStatus(buf);
                     for (auto const& hit : result.hits)
                     {
-                        wchar_t mbuf[160]{};
-                        swprintf_s(mbuf, L"downloads %lld | cf %d", hit.downloads, hit.modId);
-                        AddResultCard(hit.title, hit.description, mbuf, hit.iconUrl,
+                        AddResultCard(hit.title, hit.description, DownloadCount(hit.downloads),
+                            hit.iconUrl,
                             [this, hit]() { OnInstallCF(hit); },
                             [this, hit]() { BuildsDialogCF(hit); });
                     }
@@ -522,7 +591,7 @@ namespace winrt::PretClient
                 m_loading = false;
                 if (result.hits.empty() && m_offset == 0)
                 {
-                    SetStatus(L"No results (check the query, or offline?).");
+                    SetStatus(L"No matching results. Try a broader search or check your connection.");
                     return;
                 }
                 m_total = result.total;
@@ -532,15 +601,14 @@ namespace winrt::PretClient
                 if (!m_lastLoader.empty() && m_lastLoader != L"all")
                     filter += L" " + std::wstring{ m_lastLoader };
                 if (m_total > 0)
-                    swprintf_s(buf, L"%d of %lld results%s (scroll for more).", m_offset, m_total, filter.c_str());
+                    swprintf_s(buf, L"Showing %d of %lld%s", m_offset, m_total, filter.c_str());
                 else
-                    swprintf_s(buf, L"%d result(s)%s.", m_offset, filter.c_str());
+                    swprintf_s(buf, L"%d result(s)%s", m_offset, filter.c_str());
                 SetStatus(buf);
                 for (auto const& hit : result.hits)
                 {
-                    wchar_t mbuf[128]{};
-                    swprintf_s(mbuf, L"downloads %lld | %s", hit.downloads, std::wstring{ hit.slug }.c_str());
-                    AddResultCard(hit.title, hit.description, mbuf, hit.iconUrl,
+                    AddResultCard(hit.title, hit.description, DownloadCount(hit.downloads),
+                        hit.iconUrl,
                         [this, hit]() { OnInstall(hit); },
                         [this, hit]() { BuildsDialog(hit); });
                 }

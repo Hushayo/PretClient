@@ -30,7 +30,7 @@ namespace winrt::PretClient
         };
 
         ModsPage();
-        Microsoft::UI::Xaml::Controls::StackPanel Root() const
+        Microsoft::UI::Xaml::Controls::Grid Root() const
         {
             return m_root;
         }
@@ -68,7 +68,7 @@ namespace winrt::PretClient
         winrt::fire_and_forget LoadIcon(hstring url, Microsoft::UI::Xaml::Controls::Image img);
         void SetStatus(hstring const& line);
 
-        Microsoft::UI::Xaml::Controls::StackPanel m_root{};
+        Microsoft::UI::Xaml::Controls::Grid m_root{};
         Microsoft::UI::Xaml::Controls::ScrollViewer m_scroll{};
         Microsoft::UI::Xaml::Controls::TextBlock m_head{};
         Microsoft::UI::Xaml::Controls::Button m_tabModrinth{};
