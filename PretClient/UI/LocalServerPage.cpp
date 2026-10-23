@@ -565,7 +565,11 @@ namespace winrt::PretClient
             dialog.Content(panel);
             dialog.PrimaryButtonText(L"Create");
             dialog.CloseButtonText(L"Cancel");
-            dialog.DefaultButton(ContentDialogButton::Primary);
+            // ContentDialog's PrimaryAsDefaultButton visual state assigns the
+            // stock AccentButtonStyle with a StaticResource, which overrides
+            // PrimaryButtonStyle and leaves this button pale mint. Keeping no
+            // default button lets our brand style below win.
+            dialog.DefaultButton(ContentDialogButton::None);
             try
             {
                 dialog.PrimaryButtonStyle(Application::Current().Resources()
@@ -1622,7 +1626,10 @@ namespace winrt::PretClient
         if (ok)
         {
             DbgLog("console started " + to_string(std::wstring{ id }));
-            SetStatus(L"Server running.");
+            // The card/detail status is derived from the live process. A
+            // separate "Server running." banner goes stale the moment the
+            // process exits (e.g. Java/EULA errors), contradicting the card.
+            SetStatus(L"");
         }
         else
         {

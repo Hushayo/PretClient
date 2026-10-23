@@ -156,6 +156,7 @@ namespace winrt::PretClient
             else if (tag == L"settings")
             {
                 m_settings.Refresh();
+                m_settings.ResetScroll();
                 m_host.Children().Append(m_settings.Root());
                 FadeContent(m_settings.Root());
             }

@@ -282,6 +282,20 @@ namespace winrt::PretClient
         Refresh();
     }
 
+    void SettingsPage::ResetScroll()
+    {
+        try
+        {
+            // The page instance is reused by the NavigationView, so the
+            // ScrollViewer remembers where the user left it. Start each visit
+            // at the header/tabs instead of dropping in mid-form.
+            m_scroll.ChangeView(nullptr, 0.0, nullptr, true);
+        }
+        catch (...)
+        {
+        }
+    }
+
     void SettingsPage::SetTab(int idx)
     {
         m_tab = idx;

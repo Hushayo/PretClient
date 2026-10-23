@@ -346,7 +346,11 @@ namespace winrt::PretClient::Java
             return 8;
         if (requiredMajor <= 17)
             return 17;
-        return 21;
+        if (requiredMajor <= 21)
+            return 21;
+        // Minecraft 26.x needs Java 25. Map 22-25 to the current LTS rather
+        // than silently fetching a Java 21 runtime that cannot run it.
+        return 25;
     }
 
     std::filesystem::path ManagedRoot()

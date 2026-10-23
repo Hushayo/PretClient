@@ -2413,7 +2413,9 @@ namespace winrt::PretClient
         dialog.Content(panel);
         dialog.PrimaryButtonText(L"Create");
         dialog.CloseButtonText(L"Cancel");
-        dialog.DefaultButton(ContentDialogButton::Primary);
+        // See LocalServerPage: the default-button visual state swaps in the
+        // stock AccentButtonStyle and defeats PrimaryButtonStyle.
+        dialog.DefaultButton(ContentDialogButton::None);
         try
         {
             dialog.PrimaryButtonStyle(Application::Current().Resources()

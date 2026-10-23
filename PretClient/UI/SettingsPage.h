@@ -16,6 +16,7 @@ namespace winrt::PretClient
             return m_root;
         }
         void Refresh();
+        void ResetScroll();
         void SetStatus(hstring const& line);
         void OnCheckUpdates(std::function<void()> cb)
         {

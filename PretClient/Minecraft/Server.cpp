@@ -1254,8 +1254,10 @@ namespace winrt::PretClient::Server
         try
         {
             std::wstring mc{ mcVersion };
+            // The 26.x server bundler is compiled for class file 69 (Java 25);
+            // Java 21 fails at launch with UnsupportedClassVersionError.
             if (StartsWith(mc, L"26."))
-                return 21;
+                return 25;
             if (!StartsWith(mc, L"1."))
                 return 21;
             auto dot = mc.find(L'.', 2);
