@@ -2414,6 +2414,14 @@ namespace winrt::PretClient
         dialog.PrimaryButtonText(L"Create");
         dialog.CloseButtonText(L"Cancel");
         dialog.DefaultButton(ContentDialogButton::Primary);
+        try
+        {
+            dialog.PrimaryButtonStyle(Application::Current().Resources()
+                .Lookup(box_value(L"AccentButtonStyle")).as<Style>());
+        }
+        catch (...)
+        {
+        }
         dialog.XamlRoot(m_root.XamlRoot());
 
         Versions::FetchManifestAsync(

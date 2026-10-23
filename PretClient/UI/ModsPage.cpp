@@ -550,7 +550,7 @@ namespace winrt::PretClient
         });
         actions.Children().Append(builds);
 
-        Grid::SetColumn(info, 0);
+        Grid::SetColumn(head, 0);
         Grid::SetColumn(actions, 1);
         grid.Children().Append(head);
         grid.Children().Append(actions);

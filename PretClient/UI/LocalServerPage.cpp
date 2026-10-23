@@ -566,6 +566,14 @@ namespace winrt::PretClient
             dialog.PrimaryButtonText(L"Create");
             dialog.CloseButtonText(L"Cancel");
             dialog.DefaultButton(ContentDialogButton::Primary);
+            try
+            {
+                dialog.PrimaryButtonStyle(Application::Current().Resources()
+                    .Lookup(box_value(L"AccentButtonStyle")).as<Style>());
+            }
+            catch (...)
+            {
+            }
             dialog.XamlRoot(m_root.XamlRoot());
             dialog.Closed([this](ContentDialog const&, ContentDialogClosedEventArgs const&) {
                 StopGraphs();
@@ -901,8 +909,7 @@ namespace winrt::PretClient
             DbgLog("record saved");
             RefreshServers();
             DbgLog("list refreshed");
-            SetStatus(L"Server created in " + hstring{ dir.wstring() } +
-                L". Set eula=true in eula.txt, then press Run.");
+            SetStatus(L"Server created. Set eula=true in eula.txt, then press Start.");
             WorkDone();
         }
         catch (...)
