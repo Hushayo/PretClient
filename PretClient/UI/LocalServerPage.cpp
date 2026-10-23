@@ -147,6 +147,7 @@ namespace winrt::PretClient
     LocalServerPage::LocalServerPage()
     {
         m_ui = Microsoft::UI::Dispatching::DispatcherQueue::GetForCurrentThread();
+        DbgLog(std::string("ctor ui=") + (m_ui ? "ok" : "null"));
 
         m_inner.Spacing(12);
         m_inner.Padding(ThicknessHelper::FromUniformLength(24));
@@ -632,6 +633,15 @@ namespace winrt::PretClient
 
     void LocalServerPage::InstallServer(hstring name, hstring software, hstring mc)
     {
+        if (!m_ui)
+        {
+            // No dispatcher means the install callback can never come back to
+            // the UI thread. Fail loudly instead of leaving m_working stuck.
+            DbgLog("install: no UI dispatcher");
+            SetStatus(L"Internal error: UI dispatcher unavailable.");
+            WorkDone();
+            return;
+        }
         if (m_working)
         {
             SetStatus(L"Already working on a server - wait for it to finish.");
@@ -659,226 +669,254 @@ namespace winrt::PretClient
         SetStatus(L"Resolving " + label + L" " + mc + L"...");
         DbgLog("install start sw=" + to_string(software) + " mc=" + to_string(mc));
         Server::ResolveArtifactAsync(software, mc,
-            [this, name, software, mc](Server::Artifact art, hstring err) -> fire_and_forget {
+            [this, name, software, mc](Server::Artifact art, hstring err) {
+                // ResolveArtifactAsync invokes this on a worker thread and then
+                // destroys the std::function that owns this closure. Never make
+                // this callback a coroutine: its captures would dangle after the
+                // download await (the 0xc0000005-at-0 crash). Copy every value
+                // into queued UI work and start a named coroutine there.
                 try
                 {
-                    if (!err.empty())
+                    DbgLog("artifact callback -> ui");
+                    if (!m_ui)
                     {
-                        SetStatus(err);
-                        WorkDone();
-                        co_return;
+                        DbgLog("artifact callback: no UI dispatcher");
+                        return;
                     }
-                    auto dir = Server::ServersDir() / std::wstring{ Server::NewServerId() };
-                    auto dest = dir / std::wstring{ art.fileName };
-                    DbgLog("resolved kind=" + std::to_string(static_cast<int>(art.kind)) +
-                        " dest=" + to_string(dest.wstring()));
-                    SetStatus(L"Downloading " + hstring{ art.fileName } + L"...");
-                    m_progress.IsIndeterminate(true);
-                    hstring dlErr = co_await Http::DownloadToFileAsync(art.url, dest, kUA,
-                        [this](unsigned long long doneBytes, unsigned long long total, double) {
+                    m_ui.TryEnqueue([this, name, software, mc,
+                                        art = std::move(art), err = std::move(err)]() mutable {
+                        DbgLog("artifact on ui");
+                        InstallServerFlow(name, software, mc, std::move(art), std::move(err));
+                    });
+                }
+                catch (...)
+                {
+                    DbgLog("artifact callback enqueue failed");
+                }
+            });
+    }
+
+    fire_and_forget LocalServerPage::InstallServerFlow(hstring name, hstring software, hstring mc,
+        Server::Artifact art, hstring err)
+    {
+        try
+        {
+            if (!err.empty())
+            {
+                SetStatus(err);
+                WorkDone();
+                co_return;
+            }
+            auto dir = Server::ServersDir() / std::wstring{ Server::NewServerId() };
+            auto dest = dir / std::wstring{ art.fileName };
+            DbgLog("resolved kind=" + std::to_string(static_cast<int>(art.kind)) +
+                " dest=" + to_string(dest.wstring()));
+            SetStatus(L"Downloading " + hstring{ art.fileName } + L"...");
+            m_progress.IsIndeterminate(true);
+            hstring dlErr = co_await Http::DownloadToFileAsync(art.url, dest, kUA,
+                [this](unsigned long long doneBytes, unsigned long long total, double) {
+                    try
+                    {
+                        if (total == 0)
+                            return;
+                        double pct = 100.0 * static_cast<double>(doneBytes) /
+                            static_cast<double>(total);
+                        // Progress fires on a background thread: marshal to UI.
+                        m_ui.TryEnqueue([this, doneBytes, total, pct] {
                             try
                             {
-                                if (total == 0)
-                                    return;
-                                double pct = 100.0 * static_cast<double>(doneBytes) /
-                                    static_cast<double>(total);
-                                // Progress fires on a background thread: marshal to UI.
-                                m_ui.TryEnqueue([this, doneBytes, total, pct] {
-                                    try
-                                    {
-                                        m_progress.IsIndeterminate(false);
-                                        m_progress.Value(pct);
-                                        wchar_t buf[128]{};
-                                        swprintf_s(buf, L"Downloading... %.0f%% (%s / %s)", pct,
-                                            MbText(doneBytes).c_str(), MbText(total).c_str());
-                                        m_status.Text(buf);
-                                    }
-                                    catch (...)
-                                    {
-                                    }
-                                });
+                                m_progress.IsIndeterminate(false);
+                                m_progress.Value(pct);
+                                wchar_t buf[128]{};
+                                swprintf_s(buf, L"Downloading... %.0f%% (%s / %s)", pct,
+                                    MbText(doneBytes).c_str(), MbText(total).c_str());
+                                m_status.Text(buf);
                             }
                             catch (...)
                             {
                             }
                         });
-                    DbgLog("download done");
-                    // Everything below touches XAML: hop onto the UI thread first
-                    // (continuations resume on a background thread; cross-thread
-                    // XAML touches AV the process past every catch(...)).
-                    co_await ForegroundAwait{ m_ui };
-                    DbgLog("resumed on ui");
-                    if (!dlErr.empty())
-                    {
-                        DbgLog("download error: " + to_string(dlErr));
-                        SetStatus(L"Download failed: " + dlErr);
-                        WorkDone();
-                        co_return;
-                    }
-                    // Size + hash checks against the published metadata.
-                    if (art.size > 0)
-                    {
-                        std::error_code ec;
-                        auto have = std::filesystem::file_size(dest, ec);
-                        if (ec || have != art.size)
-                        {
-                            std::filesystem::remove(dest, ec);
-                            SetStatus(L"Download failed: size mismatch, please retry.");
-                            WorkDone();
-                            co_return;
-                        }
-                    }
-                    if (!art.sha256.empty() || !art.sha1.empty())
-                        SetStatus(L"Checking hash...");
-                    DbgLog("verifying size/hash");
-                    if (!art.sha256.empty())
-                    {
-                        std::wstring hex;
-                        if (!Http::Sha256OfFile(dest, hex) ||
-                            _wcsicmp(hex.c_str(), std::wstring{ art.sha256 }.c_str()) != 0)
-                        {
-                            std::error_code ec;
-                            std::filesystem::remove(dest, ec);
-                            SetStatus(L"Download failed: hash mismatch, please retry.");
-                            WorkDone();
-                            co_return;
-                        }
-                    }
-                    else if (!art.sha1.empty())
-                    {
-                        std::wstring hex;
-                        if (!Http::Sha1OfFile(dest, hex) ||
-                            _wcsicmp(hex.c_str(), std::wstring{ art.sha1 }.c_str()) != 0)
-                        {
-                            std::error_code ec;
-                            std::filesystem::remove(dest, ec);
-                            SetStatus(L"Download failed: hash mismatch, please retry.");
-                            WorkDone();
-                            co_return;
-                        }
-                    }
-
-                    if (art.kind == Server::InstallKind::Installer ||
-                        art.kind == Server::InstallKind::BuildTools)
-                    {
-                        bool buildTools = (art.kind == Server::InstallKind::BuildTools);
-                        hstring java = Java::Pick(Server::RequiredJava(mc));
-                        if (java.empty())
-                        {
-                            // No usable Java: download a managed Temurin copy
-                            // instead of failing the server setup.
-                            SetStatus(L"Java not found - downloading (one-time)...");
-                            m_progress.IsIndeterminate(true);
-                            auto jlog = [this](hstring const& line) {
-                                try
-                                {
-                                    // EnsureAsync logs from background threads.
-                                    m_ui.TryEnqueue([this, line] {
-                                        try
-                                        {
-                                            SetStatus(line);
-                                        }
-                                        catch (...)
-                                        {
-                                        }
-                                    });
-                                }
-                                catch (...)
-                                {
-                                }
-                            };
-                            auto jprog = [this](unsigned long long done, unsigned long long total, double) {
-                                try
-                                {
-                                    if (total == 0)
-                                        return;
-                                    double pct = 100.0 * static_cast<double>(done) /
-                                        static_cast<double>(total);
-                                    m_ui.TryEnqueue([this, pct] {
-                                        try
-                                        {
-                                            m_progress.IsIndeterminate(false);
-                                            m_progress.Value(pct);
-                                        }
-                                        catch (...)
-                                        {
-                                        }
-                                    });
-                                }
-                                catch (...)
-                                {
-                                }
-                            };
-                            try
-                            {
-                                java = co_await Java::EnsureAsync(Server::RequiredJava(mc), jlog, jprog);
-                            }
-                            catch (...)
-                            {
-                                java = L"";
-                            }
-                            co_await ForegroundAwait{ m_ui };
-                        }
-                        if (java.empty())
-                        {
-                            SetStatus(L"No Java found for MC " + mc +
-                                L" and auto-download failed. Check your connection or install a 64-bit Java manually.");
-                            WorkDone();
-                            co_return;
-                        }
-                        hstring args = buildTools ? (L"--rev " + mc) : hstring{ L"--installServer" };
-                        SetStatus(buildTools ? L"Compiling Spigot via BuildTools (needs git in PATH, "
-                                               L"can take a long while)..."
-                                             : L"Running installer (can take a few minutes)...");
-                        m_progress.IsIndeterminate(true);
-                        int exit = co_await Server::RunJavaJarAsync(
-                            java, hstring{ dest.wstring() }, args, hstring{ dir.wstring() });
-                        co_await ForegroundAwait{ m_ui };
-                        if (exit != 0)
-                        {
-                            wchar_t buf[128]{};
-                            swprintf_s(buf, L"Setup step failed (exit %d). See the server folder.", exit);
-                            SetStatus(buf);
-                            WorkDone();
-                            co_return;
-                        }
-                        if (buildTools)
-                            WriteRunBat(dir, L"spigot-" + std::wstring{ mc } + L".jar");
-                    }
-                    else
-                    {
-                        WriteRunBat(dir, std::wstring{ art.fileName });
-                    }
-                    DbgLog("files written");
-
-                    auto all = Server::LoadServers();
-                    Server::ServerEntry entry{};
-                    entry.id = hstring{ dir.filename().wstring() };
-                    entry.name = name;
-                    entry.software = software;
-                    entry.mcVersion = mc;
-                    all.push_back(std::move(entry));
-                    Server::SaveServers(all);
-                    DbgLog("record saved");
-                    RefreshServers();
-                    DbgLog("list refreshed");
-                    SetStatus(L"Server created in " + hstring{ dir.wstring() } +
-                        L". Set eula=true in eula.txt, then press Run.");
-                    WorkDone();
-                }
-                catch (...)
-                {
-                    try
-                    {
-                        DbgLog("EXCEPTION in install flow");
-                        SetStatus(L"Server setup failed.");
-                        WorkDone();
                     }
                     catch (...)
                     {
                     }
+                });
+            DbgLog("download done");
+            // Everything below touches XAML: hop onto the UI thread first
+            // (continuations resume on a background thread; cross-thread
+            // XAML touches AV the process past every catch(...)).
+            co_await ForegroundAwait{ m_ui };
+            DbgLog("resumed on ui");
+            if (!dlErr.empty())
+            {
+                DbgLog("download error: " + to_string(dlErr));
+                SetStatus(L"Download failed: " + dlErr);
+                WorkDone();
+                co_return;
+            }
+            // Size + hash checks against the published metadata.
+            if (art.size > 0)
+            {
+                std::error_code ec;
+                auto have = std::filesystem::file_size(dest, ec);
+                if (ec || have != art.size)
+                {
+                    std::filesystem::remove(dest, ec);
+                    SetStatus(L"Download failed: size mismatch, please retry.");
+                    WorkDone();
+                    co_return;
                 }
-            });
+            }
+            if (!art.sha256.empty() || !art.sha1.empty())
+                SetStatus(L"Checking hash...");
+            DbgLog("verifying size/hash");
+            if (!art.sha256.empty())
+            {
+                std::wstring hex;
+                if (!Http::Sha256OfFile(dest, hex) ||
+                    _wcsicmp(hex.c_str(), std::wstring{ art.sha256 }.c_str()) != 0)
+                {
+                    std::error_code ec;
+                    std::filesystem::remove(dest, ec);
+                    SetStatus(L"Download failed: hash mismatch, please retry.");
+                    WorkDone();
+                    co_return;
+                }
+            }
+            else if (!art.sha1.empty())
+            {
+                std::wstring hex;
+                if (!Http::Sha1OfFile(dest, hex) ||
+                    _wcsicmp(hex.c_str(), std::wstring{ art.sha1 }.c_str()) != 0)
+                {
+                    std::error_code ec;
+                    std::filesystem::remove(dest, ec);
+                    SetStatus(L"Download failed: hash mismatch, please retry.");
+                    WorkDone();
+                    co_return;
+                }
+            }
+
+            if (art.kind == Server::InstallKind::Installer ||
+                art.kind == Server::InstallKind::BuildTools)
+            {
+                bool buildTools = (art.kind == Server::InstallKind::BuildTools);
+                hstring java = Java::Pick(Server::RequiredJava(mc));
+                if (java.empty())
+                {
+                    // No usable Java: download a managed Temurin copy
+                    // instead of failing the server setup.
+                    SetStatus(L"Java not found - downloading (one-time)...");
+                    m_progress.IsIndeterminate(true);
+                    auto jlog = [this](hstring const& line) {
+                        try
+                        {
+                            // EnsureAsync logs from background threads.
+                            m_ui.TryEnqueue([this, line] {
+                                try
+                                {
+                                    SetStatus(line);
+                                }
+                                catch (...)
+                                {
+                                }
+                            });
+                        }
+                        catch (...)
+                        {
+                        }
+                    };
+                    auto jprog = [this](unsigned long long done, unsigned long long total, double) {
+                        try
+                        {
+                            if (total == 0)
+                                return;
+                            double pct = 100.0 * static_cast<double>(done) /
+                                static_cast<double>(total);
+                            m_ui.TryEnqueue([this, pct] {
+                                try
+                                {
+                                    m_progress.IsIndeterminate(false);
+                                    m_progress.Value(pct);
+                                }
+                                catch (...)
+                                {
+                                }
+                            });
+                        }
+                        catch (...)
+                        {
+                        }
+                    };
+                    try
+                    {
+                        java = co_await Java::EnsureAsync(Server::RequiredJava(mc), jlog, jprog);
+                    }
+                    catch (...)
+                    {
+                        java = L"";
+                    }
+                    co_await ForegroundAwait{ m_ui };
+                }
+                if (java.empty())
+                {
+                    SetStatus(L"No Java found for MC " + mc +
+                        L" and auto-download failed. Check your connection or install a 64-bit Java manually.");
+                    WorkDone();
+                    co_return;
+                }
+                hstring args = buildTools ? (L"--rev " + mc) : hstring{ L"--installServer" };
+                SetStatus(buildTools ? L"Compiling Spigot via BuildTools (needs git in PATH, "
+                                       L"can take a long while)..."
+                                     : L"Running installer (can take a few minutes)...");
+                m_progress.IsIndeterminate(true);
+                int exit = co_await Server::RunJavaJarAsync(
+                    java, hstring{ dest.wstring() }, args, hstring{ dir.wstring() });
+                co_await ForegroundAwait{ m_ui };
+                if (exit != 0)
+                {
+                    wchar_t buf[128]{};
+                    swprintf_s(buf, L"Setup step failed (exit %d). See the server folder.", exit);
+                    SetStatus(buf);
+                    WorkDone();
+                    co_return;
+                }
+                if (buildTools)
+                    WriteRunBat(dir, L"spigot-" + std::wstring{ mc } + L".jar");
+            }
+            else
+            {
+                WriteRunBat(dir, std::wstring{ art.fileName });
+            }
+            DbgLog("files written");
+
+            auto all = Server::LoadServers();
+            Server::ServerEntry entry{};
+            entry.id = hstring{ dir.filename().wstring() };
+            entry.name = name;
+            entry.software = software;
+            entry.mcVersion = mc;
+            all.push_back(std::move(entry));
+            Server::SaveServers(all);
+            DbgLog("record saved");
+            RefreshServers();
+            DbgLog("list refreshed");
+            SetStatus(L"Server created in " + hstring{ dir.wstring() } +
+                L". Set eula=true in eula.txt, then press Run.");
+            WorkDone();
+        }
+        catch (...)
+        {
+            try
+            {
+                DbgLog("EXCEPTION in install flow");
+                SetStatus(L"Server setup failed.");
+                WorkDone();
+            }
+            catch (...)
+            {
+            }
+        }
     }
 
     void LocalServerPage::StartGraphs()
@@ -1757,26 +1795,48 @@ namespace winrt::PretClient
             status.Text(L"Resolving " + title + L"...");
         hstring mc = entry.mcVersion;
         Modrinth::PickFileAsync(slug, mc, L"",
-            [this, plugins, destDir, title](Modrinth::ModFile f) -> fire_and_forget {
+            [this, plugins, destDir](Modrinth::ModFile f) {
+                // Same trap as the server-jar install: this callback runs on a
+                // worker thread and PickFileAsync drops the closure right after
+                // invoking it. Queue the values and run a named coroutine.
                 try
                 {
-                    TextBlock& status2 = plugins ? m_dPluginStatus : m_dModStatus;
-                    if (f.url.empty())
-                    {
-                        if (status2)
-                            status2.Text(L"No compatible file found for this version.");
-                        co_return;
-                    }
-                    if (status2)
-                        status2.Text(L"Downloading " + f.filename + L"...");
-                    hstring err = co_await Modrinth::DownloadFileAsync(f, destDir.wstring());
-                    if (status2)
-                        status2.Text(err.empty() ? (L"Installed " + f.filename) : err);
+                    if (!m_ui)
+                        return;
+                    m_ui.TryEnqueue([this, plugins, destDir,
+                                        f = std::move(f)]() mutable {
+                        InstallServerContentFlow(plugins, std::move(destDir), std::move(f));
+                    });
                 }
                 catch (...)
                 {
                 }
             });
+    }
+
+    fire_and_forget LocalServerPage::InstallServerContentFlow(bool plugins,
+        std::filesystem::path destDir, Modrinth::ModFile f)
+    {
+        try
+        {
+            auto& status = plugins ? m_dPluginStatus : m_dModStatus;
+            if (f.url.empty())
+            {
+                if (status)
+                    status.Text(L"No compatible file found for this version.");
+                co_return;
+            }
+            if (status)
+                status.Text(L"Downloading " + f.filename + L"...");
+            hstring err = co_await Modrinth::DownloadFileAsync(f, destDir.wstring());
+            // The download resumes on a worker thread: hop back before XAML.
+            co_await ForegroundAwait{ m_ui };
+            if (status)
+                status.Text(err.empty() ? (L"Installed " + f.filename) : err);
+        }
+        catch (...)
+        {
+        }
     }
 
     void LocalServerPage::RefreshDetailFiles()

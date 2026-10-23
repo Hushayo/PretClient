@@ -6,6 +6,8 @@
 #include <map>
 #include <mutex>
 #include <string>
+#include "../Minecraft/Modrinth.h"
+#include "../Minecraft/Server.h"
 #include "../System/Stats.h"
 
 // Local Server page: server list (in-app start/stop) + a per-server detail
@@ -29,7 +31,12 @@ namespace winrt::PretClient
         void LoadVersions(hstring softwareId);
         // Resolve -> download (+verify) -> installer/BuildTools when needed
         // -> run.bat + servers.json record. Progress lives on the page.
+        // The resolver callback runs on a worker thread and owns the values it
+        // hands over; the flow itself is a named coroutine so its arguments
+        // live in the coroutine frame (never in a temporary lambda closure).
         void InstallServer(hstring name, hstring software, hstring mc);
+        winrt::fire_and_forget InstallServerFlow(hstring name, hstring software, hstring mc,
+            Server::Artifact art, hstring err);
         void RefreshServers();
         void SetStatus(hstring const& line);
         void WorkDone();
@@ -44,6 +51,8 @@ namespace winrt::PretClient
         void SendDetailCommand();
         void SearchServerContent(bool plugins);
         void InstallServerContent(bool plugins, hstring slug, hstring title);
+        winrt::fire_and_forget InstallServerContentFlow(bool plugins,
+            std::filesystem::path destDir, Modrinth::ModFile file);
         void RefreshDetailFiles();
         void RefreshDetailBackups();
         winrt::fire_and_forget BackupNow();
