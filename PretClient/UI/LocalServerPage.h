@@ -47,6 +47,8 @@ namespace winrt::PretClient
         winrt::fire_and_forget DeleteServer(hstring id);
         void BuildDetail();
         void UpdateDetailStatus();
+        Windows::Foundation::IAsyncOperation<bool> EnsureEulaAccepted(
+            std::filesystem::path dir);
         winrt::fire_and_forget StartServer(hstring id);
         void SendDetailCommand();
         void SearchServerContent(bool plugins);

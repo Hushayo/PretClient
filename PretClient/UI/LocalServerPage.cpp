@@ -8,8 +8,10 @@
 #include "../Paths.h"
 #include "../Settings.h"
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <coroutine>
+#include <fstream>
 #include <shellapi.h>
 #include <thread>
 #include <winrt/Microsoft.UI.Xaml.Input.h>
@@ -913,7 +915,7 @@ namespace winrt::PretClient
             DbgLog("record saved");
             RefreshServers();
             DbgLog("list refreshed");
-            SetStatus(L"Server created. Set eula=true in eula.txt, then press Start.");
+            SetStatus(L"Server created. Press Start and accept the EULA.");
             WorkDone();
         }
         catch (...)
@@ -1545,6 +1547,79 @@ namespace winrt::PretClient
         }
     }
 
+    IAsyncOperation<bool> LocalServerPage::EnsureEulaAccepted(std::filesystem::path dir)
+    {
+        try
+        {
+            std::ifstream in(dir / L"eula.txt");
+            std::string line;
+            while (std::getline(in, line))
+            {
+                std::string compact;
+                for (char c : line)
+                {
+                    if (!std::isspace(static_cast<unsigned char>(c)))
+                        compact.push_back(static_cast<char>(
+                            std::tolower(static_cast<unsigned char>(c))));
+                }
+                if (compact == "eula=true")
+                    co_return true;
+            }
+        }
+        catch (...)
+        {
+        }
+
+        ContentDialog dialog{};
+        dialog.Title(box_value(L"Accept the Minecraft EULA"));
+        StackPanel panel{};
+        panel.Spacing(10);
+        TextBlock text{};
+        text.Text(L"Minecraft servers will not start until you accept Mojang's EULA. "
+                  L"PretClient can't accept it on your behalf.");
+        text.TextWrapping(TextWrapping::Wrap);
+        panel.Children().Append(text);
+        HyperlinkButton link{};
+        link.Content(box_value(L"Read the Minecraft EULA"));
+        link.NavigateUri(Uri{ L"https://aka.ms/MinecraftEULA" });
+        panel.Children().Append(link);
+        dialog.Content(panel);
+        dialog.PrimaryButtonText(L"I accept");
+        dialog.CloseButtonText(L"Cancel");
+        dialog.DefaultButton(ContentDialogButton::None);
+        try
+        {
+            dialog.PrimaryButtonStyle(Application::Current().Resources()
+                .Lookup(box_value(L"AccentButtonStyle")).as<Style>());
+        }
+        catch (...)
+        {
+        }
+        dialog.XamlRoot(m_root.XamlRoot());
+        if (co_await dialog.ShowAsync() != ContentDialogResult::Primary)
+            co_return false;
+
+        try
+        {
+            std::ofstream out(dir / L"eula.txt", std::ios::trunc);
+            out << "#By changing the setting below to TRUE you are indicating your "
+                   "agreement to our EULA (https://aka.ms/MinecraftEULA).\n";
+            out << "eula=true\n";
+            if (!out)
+            {
+                SetStatus(L"Could not write eula.txt - accept it manually in the server folder.");
+                co_return false;
+            }
+        }
+        catch (...)
+        {
+            SetStatus(L"Could not write eula.txt - accept it manually in the server folder.");
+            co_return false;
+        }
+        SetStatus(L"EULA accepted.");
+        co_return true;
+    }
+
     fire_and_forget LocalServerPage::StartServer(hstring id)
     {
         if (id.empty() || Server::ConsoleRunning(id))
@@ -1559,6 +1634,15 @@ namespace winrt::PretClient
             SetStatus(L"No server jar found - open the Folder and check the install.");
             if (id == m_detailId && m_dStatus)
                 m_dStatus.Text(L"No server jar found - open the Folder and check the install.");
+            co_return;
+        }
+        // Ask once per server. The server rewrites eula.txt on every boot, so
+        // a plain "eula=true" check is enough; no separate app-side flag.
+        if (!co_await EnsureEulaAccepted(dir))
+        {
+            SetStatus(L"Start cancelled - accept the Minecraft EULA to run the server.");
+            if (id == m_detailId && m_dStatus)
+                m_dStatus.Text(L"Start cancelled - EULA not accepted.");
             co_return;
         }
         SetStatus(L"Starting server...");
