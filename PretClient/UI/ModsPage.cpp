@@ -32,6 +32,21 @@ namespace winrt::PretClient
                 swprintf_s(buf, L"%lld downloads", n);
             return hstring{ buf };
         }
+
+        std::wstring GroupDigits(long long n)
+        {
+            wchar_t raw[32]{};
+            swprintf_s(raw, L"%lld", n);
+            std::wstring digits{ raw };
+            std::wstring out;
+            for (size_t i = 0; i < digits.size(); ++i)
+            {
+                if (i > 0 && (digits.size() - i) % 3 == 0)
+                    out.push_back(L',');
+                out.push_back(digits[i]);
+            }
+            return out;
+        }
     } // namespace
 
     ModsPage::ModsPage()
@@ -471,9 +486,16 @@ namespace winrt::PretClient
         grid.ColumnDefinitions().GetAt(0).Width(GridLengthHelper::FromValueAndType(1.0, GridUnitType::Star));
         grid.ColumnDefinitions().GetAt(1).Width(GridLengthHelper::Auto());
 
-        StackPanel head{};
-        head.Orientation(Orientation::Horizontal);
-        head.Spacing(10);
+        // A horizontal StackPanel measures its children with infinite width,
+        // so the wrapped description never wrapped and got clipped at the
+        // actions column. A two-column grid constrains the text properly.
+        Grid head{};
+        head.ColumnSpacing(10);
+        head.ColumnDefinitions().Append(ColumnDefinition{});
+        head.ColumnDefinitions().Append(ColumnDefinition{});
+        head.ColumnDefinitions().GetAt(0).Width(GridLengthHelper::Auto());
+        head.ColumnDefinitions().GetAt(1).Width(
+            GridLengthHelper::FromValueAndType(1.0, GridUnitType::Star));
 
         Image icon{};
         icon.Width(44);
@@ -481,10 +503,12 @@ namespace winrt::PretClient
         icon.Stretch(Stretch::Uniform);
         if (!iconUrl.empty())
             LoadIcon(iconUrl, icon);
+        Grid::SetColumn(icon, 0);
         head.Children().Append(icon);
 
         StackPanel info{};
         info.Spacing(2);
+        Grid::SetColumn(info, 1);
         head.Children().Append(info);
         TextBlock titleBlock{};
         titleBlock.Text(title);
@@ -496,6 +520,8 @@ namespace winrt::PretClient
         descBlock.Style(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>());
         descBlock.Opacity(0.7);
         descBlock.TextWrapping(TextWrapping::Wrap);
+        descBlock.MaxLines(2);
+        descBlock.TextTrimming(TextTrimming::CharacterEllipsis);
         info.Children().Append(descBlock);
         TextBlock metaBlock{};
         metaBlock.Text(meta);
@@ -567,7 +593,8 @@ namespace winrt::PretClient
                     if (!m_lastLoader.empty() && m_lastLoader != L"all")
                         filter += L" " + std::wstring{ m_lastLoader };
                     if (m_total > 0)
-                        swprintf_s(buf, L"Showing %d of %lld%s", m_offset, m_total, filter.c_str());
+                        swprintf_s(buf, L"Showing %d of %s%s", m_offset,
+                            GroupDigits(m_total).c_str(), filter.c_str());
                     else
                         swprintf_s(buf, L"%d result(s)%s", m_offset, filter.c_str());
                     SetStatus(buf);
@@ -601,7 +628,8 @@ namespace winrt::PretClient
                 if (!m_lastLoader.empty() && m_lastLoader != L"all")
                     filter += L" " + std::wstring{ m_lastLoader };
                 if (m_total > 0)
-                    swprintf_s(buf, L"Showing %d of %lld%s", m_offset, m_total, filter.c_str());
+                    swprintf_s(buf, L"Showing %d of %s%s", m_offset,
+                        GroupDigits(m_total).c_str(), filter.c_str());
                 else
                     swprintf_s(buf, L"%d result(s)%s", m_offset, filter.c_str());
                 SetStatus(buf);

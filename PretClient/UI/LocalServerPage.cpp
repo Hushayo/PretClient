@@ -165,7 +165,7 @@ namespace winrt::PretClient
 
         // Same brand accent as every other primary action; the old one-off
         // blue was the only non-green control in the app.
-        m_create.Content(box_value(L"Create a Server"));
+        m_create.Content(box_value(L"Create server"));
         m_create.Style(Application::Current().Resources().Lookup(box_value(L"AccentButtonStyle")).as<Style>());
         m_create.MinWidth(150);
         m_create.HorizontalAlignment(HorizontalAlignment::Left);
@@ -445,7 +445,7 @@ namespace winrt::PretClient
                 title.HorizontalAlignment(HorizontalAlignment::Center);
                 col.Children().Append(title);
                 TextBlock hint{};
-                hint.Text(L"Create one to run Paper, Fabric or Forge on this PC.");
+                hint.Text(L"Servers get their own folder, console and logs.");
                 hint.Style(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>());
                 hint.Opacity(0.6);
                 hint.TextWrapping(TextWrapping::Wrap);
