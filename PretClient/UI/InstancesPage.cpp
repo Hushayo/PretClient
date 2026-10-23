@@ -454,11 +454,20 @@ namespace winrt::PretClient
             stats.VerticalAlignment(VerticalAlignment::Center);
             stats.TextTrimming(TextTrimming::CharacterEllipsis);
             if (running)
+            {
                 stats.Text(L"Starting game...");
+                stats.Visibility(Visibility::Visible);
+            }
             else if (preparing)
+            {
                 stats.Text(L"Downloading game files...");
+                stats.Visibility(Visibility::Visible);
+            }
             else
-                stats.Text(L"Ready to play");
+            {
+                // The Idle pill already says it; "Ready to play" was noise.
+                stats.Visibility(Visibility::Collapsed);
+            }
             metaRow.Children().Append(stats);
             nameCol.Children().Append(metaRow);
 
@@ -1911,9 +1920,14 @@ namespace winrt::PretClient
                 {
                     paintState(false, preparing);
                     if (preparing)
+                    {
                         card->stats.Text(L"Downloading game files...");
+                        card->stats.Visibility(Visibility::Visible);
+                    }
                     else
-                        card->stats.Text(L"Ready to play");
+                    {
+                        card->stats.Visibility(Visibility::Collapsed);
+                    }
                     // The log lives on the Log tab: keep the last text when idle
                     // (crash logs stay readable) and follow the tab toggle.
                     if (card->gamelog)
@@ -1925,10 +1939,10 @@ namespace winrt::PretClient
                 }
                 paintState(true, false);
                 wchar_t buf[192]{};
-                swprintf_s(buf, L"pid %lu | CPU %s | RAM %s | GPU %s",
-                    r.pid,
+                swprintf_s(buf, L"CPU %s  \u00B7  RAM %s  \u00B7  GPU %s",
                     Pct(r.cpu).c_str(), FormatBytes(r.ram).c_str(), Pct(sys.gpuPercent).c_str());
                 card->stats.Text(buf);
+                card->stats.Visibility(Visibility::Visible);
                 if (!r.tail.empty() && card->gamelog)
                 {
                     card->gamelog.Text(r.tail);

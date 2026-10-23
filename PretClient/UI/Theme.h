@@ -28,28 +28,134 @@ namespace winrt::PretClient::Theme
         put(L"SystemAccentColorDark2", Windows::UI::ColorHelper::FromArgb(0xFF, 0x2B, 0x7A, 0x20));
         put(L"SystemAccentColorDark3", Windows::UI::ColorHelper::FromArgb(0xFF, 0x1F, 0x5C, 0x18));
 
-        // The stock accent-button brush is Light2 of the accent ramp, which
-        // reads as washed-out mint next to the saturated brand green. Pin
-        // the button states to the brand color so primary actions match the
-        // loader badges and status dots instead of looking disabled.
-        auto putBrush = [&](wchar_t const* key, Windows::UI::Color color) {
-            res.Insert(winrt::box_value(key),
-                winrt::box_value(Media::SolidColorBrush{ color }));
-        };
-        auto ink = Windows::UI::ColorHelper::FromArgb(0xFF, 0x08, 0x14, 0x0A);
-        putBrush(L"AccentButtonBackground", AccentBase());
-        putBrush(L"AccentButtonBackgroundPointerOver",
-            Windows::UI::ColorHelper::FromArgb(0xFF, 0x53, 0xCC, 0x40));
-        putBrush(L"AccentButtonBackgroundPressed",
-            Windows::UI::ColorHelper::FromArgb(0xFF, 0x36, 0x9E, 0x27));
-        putBrush(L"AccentButtonBorderBrush", AccentBase());
-        putBrush(L"AccentButtonBorderBrushPointerOver",
-            Windows::UI::ColorHelper::FromArgb(0xFF, 0x53, 0xCC, 0x40));
-        putBrush(L"AccentButtonBorderBrushPressed",
-            Windows::UI::ColorHelper::FromArgb(0xFF, 0x36, 0x9E, 0x27));
-        putBrush(L"AccentButtonForeground", ink);
-        putBrush(L"AccentButtonForegroundPointerOver", ink);
-        putBrush(L"AccentButtonForegroundPressed", ink);
+        // The stock AccentButtonStyle froze the Light2 accent brush at
+        // dictionary load, so changing the accent ramp alone left primary
+        // buttons a washed-out mint next to the saturated brand green.
+        // Replace the style itself with a flat brand template whose states
+        // are explicit; this also keeps hover/pressed from drifting back to
+        // the pale system brushes.
+        constexpr wchar_t kAccentStyleXaml[] = LR"XAML(
+<ResourceDictionary
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <Style x:Key="AccentButtonStyle" TargetType="Button">
+    <Setter Property="Background" Value="#44BD32" />
+    <Setter Property="Foreground" Value="#08140A" />
+    <Setter Property="BorderBrush" Value="#44BD32" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="4" />
+    <Setter Property="Padding" Value="12,6" />
+    <Setter Property="MinHeight" Value="32" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="UseSystemFocusVisuals" Value="True" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="Button">
+          <ContentPresenter
+              x:Name="ContentPresenter"
+              Background="{TemplateBinding Background}"
+              BackgroundSizing="{TemplateBinding BackgroundSizing}"
+              BorderBrush="{TemplateBinding BorderBrush}"
+              BorderThickness="{TemplateBinding BorderThickness}"
+              CornerRadius="{TemplateBinding CornerRadius}"
+              Padding="{TemplateBinding Padding}"
+              Content="{TemplateBinding Content}"
+              ContentTemplate="{TemplateBinding ContentTemplate}"
+              ContentTransitions="{TemplateBinding ContentTransitions}"
+              Foreground="{TemplateBinding Foreground}"
+              HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+              VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}"
+              AutomationProperties.AccessibilityView="Raw">
+            <ContentPresenter.BackgroundTransition>
+              <BrushTransition Duration="0:0:0.083" />
+            </ContentPresenter.BackgroundTransition>
+            <VisualStateManager.VisualStateGroups>
+              <VisualStateGroup x:Name="CommonStates">
+                <VisualState x:Name="Normal" />
+                <VisualState x:Name="PointerOver">
+                  <Storyboard>
+                    <ObjectAnimationUsingKeyFrames Storyboard.TargetName="ContentPresenter" Storyboard.TargetProperty="Background">
+                      <DiscreteObjectKeyFrame KeyTime="0">
+                        <DiscreteObjectKeyFrame.Value>
+                          <SolidColorBrush Color="#53CC40" />
+                        </DiscreteObjectKeyFrame.Value>
+                      </DiscreteObjectKeyFrame>
+                    </ObjectAnimationUsingKeyFrames>
+                    <ObjectAnimationUsingKeyFrames Storyboard.TargetName="ContentPresenter" Storyboard.TargetProperty="BorderBrush">
+                      <DiscreteObjectKeyFrame KeyTime="0">
+                        <DiscreteObjectKeyFrame.Value>
+                          <SolidColorBrush Color="#53CC40" />
+                        </DiscreteObjectKeyFrame.Value>
+                      </DiscreteObjectKeyFrame>
+                    </ObjectAnimationUsingKeyFrames>
+                  </Storyboard>
+                </VisualState>
+                <VisualState x:Name="Pressed">
+                  <Storyboard>
+                    <ObjectAnimationUsingKeyFrames Storyboard.TargetName="ContentPresenter" Storyboard.TargetProperty="Background">
+                      <DiscreteObjectKeyFrame KeyTime="0">
+                        <DiscreteObjectKeyFrame.Value>
+                          <SolidColorBrush Color="#369E27" />
+                        </DiscreteObjectKeyFrame.Value>
+                      </DiscreteObjectKeyFrame>
+                    </ObjectAnimationUsingKeyFrames>
+                    <ObjectAnimationUsingKeyFrames Storyboard.TargetName="ContentPresenter" Storyboard.TargetProperty="BorderBrush">
+                      <DiscreteObjectKeyFrame KeyTime="0">
+                        <DiscreteObjectKeyFrame.Value>
+                          <SolidColorBrush Color="#369E27" />
+                        </DiscreteObjectKeyFrame.Value>
+                      </DiscreteObjectKeyFrame>
+                    </ObjectAnimationUsingKeyFrames>
+                  </Storyboard>
+                </VisualState>
+                <VisualState x:Name="Disabled">
+                  <Storyboard>
+                    <ObjectAnimationUsingKeyFrames Storyboard.TargetName="ContentPresenter" Storyboard.TargetProperty="Background">
+                      <DiscreteObjectKeyFrame KeyTime="0">
+                        <DiscreteObjectKeyFrame.Value>
+                          <SolidColorBrush Color="#2C3A29" />
+                        </DiscreteObjectKeyFrame.Value>
+                      </DiscreteObjectKeyFrame>
+                    </ObjectAnimationUsingKeyFrames>
+                    <ObjectAnimationUsingKeyFrames Storyboard.TargetName="ContentPresenter" Storyboard.TargetProperty="BorderBrush">
+                      <DiscreteObjectKeyFrame KeyTime="0">
+                        <DiscreteObjectKeyFrame.Value>
+                          <SolidColorBrush Color="#2C3A29" />
+                        </DiscreteObjectKeyFrame.Value>
+                      </DiscreteObjectKeyFrame>
+                    </ObjectAnimationUsingKeyFrames>
+                    <ObjectAnimationUsingKeyFrames Storyboard.TargetName="ContentPresenter" Storyboard.TargetProperty="Foreground">
+                      <DiscreteObjectKeyFrame KeyTime="0">
+                        <DiscreteObjectKeyFrame.Value>
+                          <SolidColorBrush Color="#6E7F6A" />
+                        </DiscreteObjectKeyFrame.Value>
+                      </DiscreteObjectKeyFrame>
+                    </ObjectAnimationUsingKeyFrames>
+                  </Storyboard>
+                </VisualState>
+              </VisualStateGroup>
+            </VisualStateManager.VisualStateGroups>
+          </ContentPresenter>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+</ResourceDictionary>
+)XAML";
+
+        try
+        {
+            auto dict = Markup::XamlReader::Load(hstring{ kAccentStyleXaml }).as<ResourceDictionary>();
+            res.Insert(box_value(L"AccentButtonStyle"),
+                dict.Lookup(box_value(L"AccentButtonStyle")));
+        }
+        catch (...)
+        {
+            // Keep the stock style if the template cannot be parsed; the
+            // rest of the app is still usable with pale accent buttons.
+        }
     }
 
     inline Microsoft::UI::Xaml::Media::Brush CardBrush()
