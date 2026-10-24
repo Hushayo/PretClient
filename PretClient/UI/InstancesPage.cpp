@@ -122,23 +122,11 @@ namespace winrt::PretClient
         StackPanel header{};
         header.Spacing(8);
 
-        TextBlock head{};
-        head.Text(L"Instances");
-        head.Style(Application::Current().Resources().Lookup(box_value(L"TitleLargeTextBlockStyle")).as<Style>());
-        header.Children().Append(head);
-
-        TextBlock sub{};
-        sub.Text(L"One isolated game folder per setup - worlds, mods and logs never mix.");
-        sub.Style(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>());
-        sub.Opacity(0.6);
-        sub.TextWrapping(TextWrapping::Wrap);
-        header.Children().Append(sub);
-
         Button add{};
         add.Content(box_value(L"New instance"));
         add.Style(Application::Current().Resources().Lookup(box_value(L"AccentButtonStyle")).as<Style>());
         add.MinWidth(132);
-        add.HorizontalAlignment(HorizontalAlignment::Left);
+        add.HorizontalAlignment(HorizontalAlignment::Right);
         add.Click([this](IInspectable const&, RoutedEventArgs const&) { AddDialog(); });
         header.Children().Append(add);
 
@@ -625,6 +613,22 @@ namespace winrt::PretClient
             packsBtn.Click([this, id](IInspectable const&, RoutedEventArgs const&) { ResourcePacksDialog(id); });
             secondary.Children().Append(packsBtn);
 
+            Button folder{};
+            folder.Content(box_value(L"Folder"));
+            folder.MinWidth(72);
+            folder.Click([this, id](IInspectable const&, RoutedEventArgs const&) {
+                try
+                {
+                    auto s = LoadSettings();
+                    ShellExecuteW(nullptr, L"open", InstanceGameDir(s, id).wstring().c_str(),
+                        nullptr, nullptr, SW_SHOWNORMAL);
+                }
+                catch (...)
+                {
+                }
+            });
+            secondary.Children().Append(folder);
+
             Button del{};
             del.Content(box_value(L"Delete"));
             del.MinWidth(76);
@@ -742,14 +746,6 @@ namespace winrt::PretClient
             title.FontWeight(Windows::UI::Text::FontWeights::SemiBold());
             title.HorizontalAlignment(HorizontalAlignment::Center);
             col.Children().Append(title);
-            TextBlock hint{};
-            hint.Text(L"Create one to pick a Minecraft version and loader. Everything stays in its own folder.");
-            hint.Style(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>());
-            hint.Opacity(0.6);
-            hint.TextWrapping(TextWrapping::Wrap);
-            hint.TextAlignment(TextAlignment::Center);
-            hint.MaxWidth(460);
-            col.Children().Append(hint);
             empty.Child(col);
             m_cards.Children().Append(empty);
         }

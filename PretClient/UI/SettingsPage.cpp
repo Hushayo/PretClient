@@ -60,14 +60,7 @@ namespace winrt::PretClient
         head.Style(Application::Current().Resources().Lookup(box_value(L"TitleLargeTextBlockStyle")).as<Style>());
         m_inner.Children().Append(head);
 
-        TextBlock sub{};
-        sub.Text(L"Profile, folders and performance. Java and API access live under Advanced.");
-        sub.Style(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>());
-        sub.Opacity(0.6);
-        sub.TextWrapping(TextWrapping::Wrap);
-        m_inner.Children().Append(sub);
-
-        // Tab switcher: everyday settings stay front and center, overrides
+        // Tab switcher
         // move to Advanced instead of cluttering the main view.
         StackPanel tabs{};
         tabs.Orientation(Orientation::Horizontal);
@@ -109,12 +102,6 @@ namespace winrt::PretClient
             });
             body.Children().Append(def);
 
-            TextBlock folderHint{};
-            folderHint.Text(L"Defaults to %APPDATA%\\.minecraft.");
-            folderHint.Style(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>());
-            folderHint.Opacity(0.6);
-            folderHint.TextWrapping(TextWrapping::Wrap);
-            body.Children().Append(folderHint);
             m_general.Children().Append(MakeCard(L"Game folder", body));
         }
 
@@ -164,12 +151,6 @@ namespace winrt::PretClient
             dlJava.Click([this](IInspectable const&, RoutedEventArgs const&) { DownloadJava(); });
             body.Children().Append(dlJava);
 
-            TextBlock javaHint{};
-            javaHint.Text(L"Downloads Temurin (Adoptium) into PretClient's own data folder - no admin rights, no PATH changes. Missing versions are fetched automatically at launch too.");
-            javaHint.Style(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>());
-            javaHint.Opacity(0.6);
-            javaHint.TextWrapping(TextWrapping::Wrap);
-            body.Children().Append(javaHint);
             m_advanced.Children().Append(MakeCard(L"Java & JVM", body));
         }
 
@@ -182,12 +163,6 @@ namespace winrt::PretClient
             m_cfKey.HorizontalAlignment(HorizontalAlignment::Stretch);
             body.Children().Append(m_cfKey);
 
-            TextBlock hint{};
-            hint.Text(L"Pre-filled with the public community key. Only change this if CurseForge gave you your own key.");
-            hint.Style(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>());
-            hint.Opacity(0.6);
-            hint.TextWrapping(TextWrapping::Wrap);
-            body.Children().Append(hint);
             m_advanced.Children().Append(MakeCard(L"Mod API", body));
         }
         m_inner.Children().Append(m_advanced);
@@ -256,13 +231,7 @@ namespace winrt::PretClient
             updateGrid.Children().Append(check);
             body.Children().Append(updateGrid);
 
-            TextBlock hint{};
-            hint.Text(L"Checks GitHub Releases. Startup + a 6h background poll check silently.");
-            hint.Style(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>());
-            hint.Opacity(0.6);
-            hint.TextWrapping(TextWrapping::Wrap);
-            body.Children().Append(hint);
-            m_inner.Children().Append(MakeCard(L"Updates", body));
+            m_advanced.Children().Append(MakeCard(L"Updates", body));
         }
 
         // Scrollable so the Save + Updates sections stay reachable in short

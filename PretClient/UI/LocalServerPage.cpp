@@ -159,13 +159,6 @@ namespace winrt::PretClient
         head.Style(Application::Current().Resources().Lookup(box_value(L"TitleLargeTextBlockStyle")).as<Style>());
         m_inner.Children().Append(head);
 
-        TextBlock sub{};
-        sub.Text(L"Run Paper, Fabric, Forge and more on this PC - no external panel needed.");
-        sub.Style(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>());
-        sub.Opacity(0.6);
-        sub.TextWrapping(TextWrapping::Wrap);
-        m_inner.Children().Append(sub);
-
         // Same brand accent as every other primary action; the old one-off
         // blue was the only non-green control in the app.
         m_create.Content(box_value(L"Create server"));
@@ -284,6 +277,7 @@ namespace winrt::PretClient
                 }
                 auto dir = Server::ServersDir() / std::wstring{ s.id };
                 bool running = Server::ConsoleRunning(s.id);
+                bool starting = running && m_starting.count(std::wstring{ s.id }) > 0;
                 hstring shown = s.name.empty() ? s.id : s.name;
 
                 Border card{};
@@ -322,7 +316,9 @@ namespace winrt::PretClient
                 Border pill{};
                 pill.CornerRadius(CornerRadiusHelper::FromUniformRadius(10));
                 pill.Padding(ThicknessHelper::FromLengths(10, 4, 10, 4));
-                pill.Background(running ? Theme::PillRunningBackground() : Theme::PillIdleBackground());
+                pill.Background(starting
+                    ? SolidColorBrush{ Windows::UI::ColorHelper::FromArgb(110, 0x3B, 0x82, 0xF6) }
+                    : (running ? Theme::PillRunningBackground() : Theme::PillIdleBackground()));
                 pill.VerticalAlignment(VerticalAlignment::Top);
                 StackPanel pillInner{};
                 pillInner.Orientation(Orientation::Horizontal);
@@ -331,15 +327,19 @@ namespace winrt::PretClient
                 Microsoft::UI::Xaml::Shapes::Ellipse dot{};
                 dot.Width(8);
                 dot.Height(8);
-                dot.Fill(running ? Theme::RailRunningBrush() : Theme::RailIdleBrush());
+                dot.Fill(starting
+                    ? SolidColorBrush{ Windows::UI::ColorHelper::FromArgb(255, 0x3B, 0x82, 0xF6) }
+                    : (running ? Theme::RailRunningBrush() : Theme::RailIdleBrush()));
                 dot.VerticalAlignment(VerticalAlignment::Center);
                 pillInner.Children().Append(dot);
                 TextBlock state{};
                 state.Style(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>());
-                state.Text(running ? L"Running" : L"Stopped");
-                state.Foreground(running
-                        ? Theme::PillRunningForeground().as<Microsoft::UI::Xaml::Media::Brush>()
-                        : Theme::DimBrush().as<Microsoft::UI::Xaml::Media::Brush>());
+                state.Text(starting ? L"Starting up..." : (running ? L"Running" : L"Stopped"));
+                state.Foreground(starting
+                    ? SolidColorBrush{ Windows::UI::ColorHelper::FromArgb(255, 0x3B, 0x82, 0xF6) }.as<Microsoft::UI::Xaml::Media::Brush>()
+                    : (running
+                           ? Theme::PillRunningForeground().as<Microsoft::UI::Xaml::Media::Brush>()
+                           : Theme::DimBrush().as<Microsoft::UI::Xaml::Media::Brush>()));
                 state.VerticalAlignment(VerticalAlignment::Center);
                 pillInner.Children().Append(state);
                 pill.Child(pillInner);
@@ -447,13 +447,6 @@ namespace winrt::PretClient
                 title.FontWeight(Windows::UI::Text::FontWeights::SemiBold());
                 title.HorizontalAlignment(HorizontalAlignment::Center);
                 col.Children().Append(title);
-                TextBlock hint{};
-                hint.Text(L"Servers get their own folder, console and logs.");
-                hint.Style(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>());
-                hint.Opacity(0.6);
-                hint.TextWrapping(TextWrapping::Wrap);
-                hint.TextAlignment(TextAlignment::Center);
-                col.Children().Append(hint);
                 empty.Child(col);
                 m_servers.Children().Append(empty);
             }
@@ -1645,9 +1638,10 @@ namespace winrt::PretClient
                 m_dStatus.Text(L"Start cancelled - EULA not accepted.");
             co_return;
         }
-        SetStatus(L"Starting server...");
+        SetStatus(L"Starting up...");
         if (id == m_detailId && m_dStatus)
-            m_dStatus.Text(L"Starting server...");
+            m_dStatus.Text(L"Starting up...");
+        m_starting.insert(std::wstring{ id });
         int mem = 2048;
         try
         {
@@ -1768,6 +1762,8 @@ namespace winrt::PretClient
         {
             std::wstring key{ id };
             auto& back = m_backlog[key];
+            if (!line.empty() && line.find("Done") != std::string::npos)
+                m_starting.erase(key);
             if (!line.empty())
                 back += to_hstring(line).c_str();
             if (!line.empty())
@@ -1798,6 +1794,7 @@ namespace winrt::PretClient
             }
             if (exited)
             {
+                m_starting.erase(key);
                 UpdateDetailStatus();
                 RefreshServers();
             }

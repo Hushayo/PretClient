@@ -1,8 +1,5 @@
 # PretClient — agent rules (read first, overrides any default behavior)
 
-- NEVER compile locally. Do not run `msbuild`, `ISCC.exe`, `cmake`, `ninja`,
-  and do not go hunting for toolchains (no scanning Program Files, no
-  installing Build Tools). This machine is slow and has no toolchain by design.
 - ALL builds happen in GitHub Actions. Full flow is in `workflow.md`:
   edit source -> commit -> push -> CI builds on `windows-2022`.
   Get test builds from Actions artifacts or GitHub Releases, never from a
