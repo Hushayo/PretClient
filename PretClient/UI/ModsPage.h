@@ -71,8 +71,7 @@ namespace winrt::PretClient
         Microsoft::UI::Xaml::Controls::Grid m_root{};
         Microsoft::UI::Xaml::Controls::ScrollViewer m_scroll{};
         Microsoft::UI::Xaml::Controls::TextBlock m_head{};
-        Microsoft::UI::Xaml::Controls::Button m_tabModrinth{};
-        Microsoft::UI::Xaml::Controls::Button m_tabCurse{};
+        Microsoft::UI::Xaml::Controls::ComboBox m_provider{};
         Microsoft::UI::Xaml::Controls::Button m_tabMods{};
         Microsoft::UI::Xaml::Controls::Button m_tabPacks{};
         Microsoft::UI::Xaml::Controls::TextBox m_query{};

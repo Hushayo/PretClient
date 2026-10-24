@@ -4,6 +4,7 @@
 #include <deque>
 #include <filesystem>
 #include <map>
+#include <set>
 #include <mutex>
 #include <string>
 #include "../Minecraft/Modrinth.h"
@@ -139,5 +140,6 @@ namespace winrt::PretClient
         std::atomic<int> m_detailGen{ 0 };
         std::atomic<bool> m_detailStop{ false };
         std::map<std::wstring, std::wstring> m_backlog{}; // console text per server
+std::set<std::wstring> m_starting{}; // servers not yet reporting Done
     };
 }

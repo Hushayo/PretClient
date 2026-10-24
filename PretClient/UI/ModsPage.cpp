@@ -69,15 +69,7 @@ namespace winrt::PretClient
         top.Children().Append(head);
         m_head = head;
 
-        TextBlock sub{};
-        sub.Text(L"Browse Modrinth or CurseForge and install straight into an instance.");
-        sub.Style(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>());
-        sub.Opacity(0.6);
-        sub.TextWrapping(TextWrapping::Wrap);
-        top.Children().Append(sub);
-
-        // Content and source tabs share one row: four stacked buttons spent
-        // a whole row of vertical space and read as two unrelated toolbars.
+        // Content and source tabs share one row:
         Grid tabRow{};
         tabRow.ColumnDefinitions().Append(ColumnDefinition{});
         tabRow.ColumnDefinitions().Append(ColumnDefinition{});
@@ -103,14 +95,16 @@ namespace winrt::PretClient
         tabs.Orientation(Orientation::Horizontal);
         tabs.Spacing(8);
         tabs.HorizontalAlignment(HorizontalAlignment::Right);
-        m_tabModrinth.Content(box_value(L"Modrinth"));
-        m_tabCurse.Content(box_value(L"CurseForge"));
-        m_tabModrinth.MinWidth(96);
-        m_tabCurse.MinWidth(96);
-        m_tabModrinth.Click([this](IInspectable const&, RoutedEventArgs const&) { SetSource(Source::Modrinth); });
-        m_tabCurse.Click([this](IInspectable const&, RoutedEventArgs const&) { SetSource(Source::CurseForge); });
-        tabs.Children().Append(m_tabModrinth);
-        tabs.Children().Append(m_tabCurse);
+        m_provider.MinWidth(140);
+        m_provider.Items().Append(box_value(L"Modrinth"));
+        m_provider.Items().Append(box_value(L"CurseForge"));
+        m_provider.SelectedIndex(m_source == Source::Modrinth ? 0 : 1);
+        m_provider.SelectionChanged([this](IInspectable const&, SelectionChangedEventArgs const&) {
+            if (m_syncing)
+                return;
+            SetSource(m_provider.SelectedIndex() == 0 ? Source::Modrinth : Source::CurseForge);
+        });
+        tabs.Children().Append(m_provider);
         Grid::SetColumn(tabs, 1);
         tabRow.Children().Append(tabs);
         top.Children().Append(tabRow);
@@ -414,10 +408,9 @@ namespace winrt::PretClient
     {
         try
         {
-            auto accent = Application::Current().Resources().Lookup(box_value(L"AccentButtonStyle")).as<Style>();
-            bool cf = (m_source == Source::CurseForge);
-            m_tabModrinth.Style(cf ? Style{ nullptr } : accent);
-            m_tabCurse.Style(cf ? accent : Style{ nullptr });
+            m_syncing = true;
+            m_provider.SelectedIndex(m_source == Source::Modrinth ? 0 : 1);
+            m_syncing = false;
         }
         catch (...)
         {
