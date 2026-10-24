@@ -317,7 +317,7 @@ namespace winrt::PretClient
                 pill.CornerRadius(CornerRadiusHelper::FromUniformRadius(10));
                 pill.Padding(ThicknessHelper::FromLengths(10, 4, 10, 4));
                 pill.Background(starting
-                    ? SolidColorBrush{ Windows::UI::ColorHelper::FromArgb(110, 0x3B, 0x82, 0xF6) }
+                    ? Media::SolidColorBrush{ Windows::UI::ColorHelper::FromArgb(110, 0x3B, 0x82, 0xF6) }
                     : (running ? Theme::PillRunningBackground() : Theme::PillIdleBackground()));
                 pill.VerticalAlignment(VerticalAlignment::Top);
                 StackPanel pillInner{};
@@ -328,7 +328,7 @@ namespace winrt::PretClient
                 dot.Width(8);
                 dot.Height(8);
                 dot.Fill(starting
-                    ? SolidColorBrush{ Windows::UI::ColorHelper::FromArgb(255, 0x3B, 0x82, 0xF6) }
+                    ? Media::SolidColorBrush{ Windows::UI::ColorHelper::FromArgb(255, 0x3B, 0x82, 0xF6) }
                     : (running ? Theme::RailRunningBrush() : Theme::RailIdleBrush()));
                 dot.VerticalAlignment(VerticalAlignment::Center);
                 pillInner.Children().Append(dot);
@@ -336,7 +336,7 @@ namespace winrt::PretClient
                 state.Style(Application::Current().Resources().Lookup(box_value(L"CaptionTextBlockStyle")).as<Style>());
                 state.Text(starting ? L"Starting up..." : (running ? L"Running" : L"Stopped"));
                 state.Foreground(starting
-                    ? SolidColorBrush{ Windows::UI::ColorHelper::FromArgb(255, 0x3B, 0x82, 0xF6) }.as<Microsoft::UI::Xaml::Media::Brush>()
+                    ? Media::SolidColorBrush{ Windows::UI::ColorHelper::FromArgb(255, 0x3B, 0x82, 0xF6) }.as<Microsoft::UI::Xaml::Media::Brush>()
                     : (running
                            ? Theme::PillRunningForeground().as<Microsoft::UI::Xaml::Media::Brush>()
                            : Theme::DimBrush().as<Microsoft::UI::Xaml::Media::Brush>()));
