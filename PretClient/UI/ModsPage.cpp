@@ -476,7 +476,7 @@ namespace winrt::PretClient
         card.Background(Theme::CardBrush());
         card.BorderBrush(Theme::CardStroke());
         card.BorderThickness(ThicknessHelper::FromUniformLength(1));
-        card.CornerRadius(CornerRadiusHelper::FromUniformRadius(12));
+        card.CornerRadius(CornerRadiusHelper::FromUniformRadius(10));
         card.Padding(ThicknessHelper::FromUniformLength(14));
 
         Grid grid{};
@@ -854,7 +854,7 @@ namespace winrt::PretClient
                     card.Background(Theme::CardBrush());
                     card.BorderBrush(Theme::CardStroke());
                     card.BorderThickness(ThicknessHelper::FromUniformLength(1));
-                    card.CornerRadius(CornerRadiusHelper::FromUniformRadius(6));
+                    card.CornerRadius(CornerRadiusHelper::FromUniformRadius(8));
                     card.Padding(ThicknessHelper::FromUniformLength(10));
 
                     Grid grid{};
@@ -1112,7 +1112,7 @@ namespace winrt::PretClient
                         card.Background(Theme::CardBrush());
                         card.BorderBrush(Theme::CardStroke());
                         card.BorderThickness(ThicknessHelper::FromUniformLength(1));
-                        card.CornerRadius(CornerRadiusHelper::FromUniformRadius(6));
+                        card.CornerRadius(CornerRadiusHelper::FromUniformRadius(8));
                         card.Padding(ThicknessHelper::FromUniformLength(10));
 
                         Grid grid{};

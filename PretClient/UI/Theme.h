@@ -7,7 +7,7 @@ namespace winrt::PretClient::Theme
 {
     inline Windows::UI::Color AccentBase()
     {
-        return Windows::UI::ColorHelper::FromArgb(0xFF, 0x44, 0xBD, 0x32);
+        return Windows::UI::ColorHelper::FromArgb(0xFF, 0x22, 0xC5, 0x5E);
     }
 
     inline void ApplyBranding()
@@ -20,7 +20,7 @@ namespace winrt::PretClient::Theme
             res.Insert(winrt::box_value(key), winrt::box_value(color));
         };
         // Coherent green ramp so hover/pressed/disabled states stay green.
-        put(L"SystemAccentColor", Windows::UI::ColorHelper::FromArgb(0xFF, 0x44, 0xBD, 0x32));
+        put(L"SystemAccentColor", Windows::UI::ColorHelper::FromArgb(0xFF, 0x22, 0xC5, 0x5E));
         put(L"SystemAccentColorLight3", Windows::UI::ColorHelper::FromArgb(0xFF, 0xC9, 0xF2, 0xC4));
         put(L"SystemAccentColorLight2", Windows::UI::ColorHelper::FromArgb(0xFF, 0xA9, 0xE8, 0xA4));
         put(L"SystemAccentColorLight1", Windows::UI::ColorHelper::FromArgb(0xFF, 0x78, 0xD8, 0x72));
@@ -39,9 +39,9 @@ namespace winrt::PretClient::Theme
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
   <Style x:Key="AccentButtonStyle" TargetType="Button">
-    <Setter Property="Background" Value="#44BD32" />
+    <Setter Property="Background" Value="#22C55E" />
     <Setter Property="Foreground" Value="#08140A" />
-    <Setter Property="BorderBrush" Value="#44BD32" />
+    <Setter Property="BorderBrush" Value="#22C55E" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="4" />
     <Setter Property="Padding" Value="12,6" />
@@ -79,14 +79,14 @@ namespace winrt::PretClient::Theme
                     <ObjectAnimationUsingKeyFrames Storyboard.TargetName="ContentPresenter" Storyboard.TargetProperty="Background">
                       <DiscreteObjectKeyFrame KeyTime="0">
                         <DiscreteObjectKeyFrame.Value>
-                          <SolidColorBrush Color="#53CC40" />
+                          <SolidColorBrush Color="#4ADE80" />
                         </DiscreteObjectKeyFrame.Value>
                       </DiscreteObjectKeyFrame>
                     </ObjectAnimationUsingKeyFrames>
                     <ObjectAnimationUsingKeyFrames Storyboard.TargetName="ContentPresenter" Storyboard.TargetProperty="BorderBrush">
                       <DiscreteObjectKeyFrame KeyTime="0">
                         <DiscreteObjectKeyFrame.Value>
-                          <SolidColorBrush Color="#53CC40" />
+                          <SolidColorBrush Color="#4ADE80" />
                         </DiscreteObjectKeyFrame.Value>
                       </DiscreteObjectKeyFrame>
                     </ObjectAnimationUsingKeyFrames>
@@ -97,14 +97,14 @@ namespace winrt::PretClient::Theme
                     <ObjectAnimationUsingKeyFrames Storyboard.TargetName="ContentPresenter" Storyboard.TargetProperty="Background">
                       <DiscreteObjectKeyFrame KeyTime="0">
                         <DiscreteObjectKeyFrame.Value>
-                          <SolidColorBrush Color="#369E27" />
+                          <SolidColorBrush Color="#16A34A" />
                         </DiscreteObjectKeyFrame.Value>
                       </DiscreteObjectKeyFrame>
                     </ObjectAnimationUsingKeyFrames>
                     <ObjectAnimationUsingKeyFrames Storyboard.TargetName="ContentPresenter" Storyboard.TargetProperty="BorderBrush">
                       <DiscreteObjectKeyFrame KeyTime="0">
                         <DiscreteObjectKeyFrame.Value>
-                          <SolidColorBrush Color="#369E27" />
+                          <SolidColorBrush Color="#16A34A" />
                         </DiscreteObjectKeyFrame.Value>
                       </DiscreteObjectKeyFrame>
                     </ObjectAnimationUsingKeyFrames>
@@ -115,21 +115,21 @@ namespace winrt::PretClient::Theme
                     <ObjectAnimationUsingKeyFrames Storyboard.TargetName="ContentPresenter" Storyboard.TargetProperty="Background">
                       <DiscreteObjectKeyFrame KeyTime="0">
                         <DiscreteObjectKeyFrame.Value>
-                          <SolidColorBrush Color="#2C3A29" />
+                          <SolidColorBrush Color="#1F2B20" />
                         </DiscreteObjectKeyFrame.Value>
                       </DiscreteObjectKeyFrame>
                     </ObjectAnimationUsingKeyFrames>
                     <ObjectAnimationUsingKeyFrames Storyboard.TargetName="ContentPresenter" Storyboard.TargetProperty="BorderBrush">
                       <DiscreteObjectKeyFrame KeyTime="0">
                         <DiscreteObjectKeyFrame.Value>
-                          <SolidColorBrush Color="#2C3A29" />
+                          <SolidColorBrush Color="#1F2B20" />
                         </DiscreteObjectKeyFrame.Value>
                       </DiscreteObjectKeyFrame>
                     </ObjectAnimationUsingKeyFrames>
                     <ObjectAnimationUsingKeyFrames Storyboard.TargetName="ContentPresenter" Storyboard.TargetProperty="Foreground">
                       <DiscreteObjectKeyFrame KeyTime="0">
                         <DiscreteObjectKeyFrame.Value>
-                          <SolidColorBrush Color="#6E7F6A" />
+                          <SolidColorBrush Color="#6A7E66" />
                         </DiscreteObjectKeyFrame.Value>
                       </DiscreteObjectKeyFrame>
                     </ObjectAnimationUsingKeyFrames>
@@ -204,7 +204,7 @@ namespace winrt::PretClient::Theme
     }
     inline Windows::UI::Color RailRunningColor()
     {
-        return Windows::UI::ColorHelper::FromArgb(0xFF, 0x44, 0xBD, 0x32);
+        return Windows::UI::ColorHelper::FromArgb(0xFF, 0x22, 0xC5, 0x5E);
     }
     inline Windows::UI::Color RailPreparingColor()
     {
@@ -228,7 +228,7 @@ namespace winrt::PretClient::Theme
     }
     inline Microsoft::UI::Xaml::Media::SolidColorBrush PillRunningBackground()
     {
-        return Microsoft::UI::Xaml::Media::SolidColorBrush{ Windows::UI::ColorHelper::FromArgb(0x2E, 0x44, 0xBD, 0x32) };
+        return Microsoft::UI::Xaml::Media::SolidColorBrush{ Windows::UI::ColorHelper::FromArgb(0x2E, 0x22, 0xC5, 0x5E) };
     }
     inline Microsoft::UI::Xaml::Media::SolidColorBrush PillPreparingBackground()
     {

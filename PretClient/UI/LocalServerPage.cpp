@@ -290,7 +290,7 @@ namespace winrt::PretClient
                 card.Background(Theme::CardBrush());
                 card.BorderBrush(Theme::CardStroke());
                 card.BorderThickness(ThicknessHelper::FromUniformLength(1));
-                card.CornerRadius(CornerRadiusHelper::FromUniformRadius(12));
+                card.CornerRadius(CornerRadiusHelper::FromUniformRadius(10));
                 card.Padding(ThicknessHelper::FromUniformLength(16));
 
                 StackPanel col{};
@@ -436,7 +436,7 @@ namespace winrt::PretClient
                 empty.Background(Theme::SubtleFillBrush());
                 empty.BorderBrush(Theme::CardStroke());
                 empty.BorderThickness(ThicknessHelper::FromUniformLength(1));
-                empty.CornerRadius(CornerRadiusHelper::FromUniformRadius(12));
+                empty.CornerRadius(CornerRadiusHelper::FromUniformRadius(10));
                 empty.Padding(ThicknessHelper::FromUniformLength(28));
                 StackPanel col{};
                 col.Spacing(4);
@@ -556,7 +556,7 @@ namespace winrt::PretClient
                 panel.Children().Append(row);
             };
             addGraph(L"CPU", m_cpuValue, m_cpuLine,
-                Windows::UI::ColorHelper::FromArgb(0xFF, 0x44, 0xBD, 0x32));
+                Windows::UI::ColorHelper::FromArgb(0xFF, 0x22, 0xC5, 0x5E));
             addGraph(L"Memory", m_memValue, m_memLine,
                 Windows::UI::ColorHelper::FromArgb(0xFF, 0x4C, 0xC2, 0xFF));
             addGraph(L"Storage", m_diskValue, m_diskLine,
@@ -1099,7 +1099,7 @@ namespace winrt::PretClient
             card.Background(Theme::CardBrush());
             card.BorderBrush(Theme::CardStroke());
             card.BorderThickness(ThicknessHelper::FromUniformLength(1));
-            card.CornerRadius(CornerRadiusHelper::FromUniformRadius(12));
+            card.CornerRadius(CornerRadiusHelper::FromUniformRadius(10));
             card.Padding(ThicknessHelper::FromUniformLength(16));
             return card;
         }
@@ -1392,7 +1392,7 @@ namespace winrt::PretClient
             m_dMemLine = Microsoft::UI::Xaml::Shapes::Polyline{};
             m_dDiskLine = Microsoft::UI::Xaml::Shapes::Polyline{};
             addGraph(L"CPU", m_dCpuValue, m_dCpuLine,
-                Windows::UI::ColorHelper::FromArgb(0xFF, 0x44, 0xBD, 0x32));
+                Windows::UI::ColorHelper::FromArgb(0xFF, 0x22, 0xC5, 0x5E));
             addGraph(L"Memory", m_dMemValue, m_dMemLine,
                 Windows::UI::ColorHelper::FromArgb(0xFF, 0x4C, 0xC2, 0xFF));
             addGraph(L"Storage", m_dDiskValue, m_dDiskLine,

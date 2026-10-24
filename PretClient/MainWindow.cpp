@@ -110,7 +110,7 @@ namespace winrt::PretClient
         nav.IsSettingsVisible(false);
         // Fixed slim rail at every window size: Auto mode flips compact <->
         // expanded past a width threshold, which is the jump on maximize.
-        nav.PaneDisplayMode(NavigationViewPaneDisplayMode::LeftCompact);
+        nav.PaneDisplayMode(NavigationViewPaneDisplayMode::Left);
         nav.PaneTitle(L"PretClient");
 
         m_navInstances.Content(box_value(L"Instances"));

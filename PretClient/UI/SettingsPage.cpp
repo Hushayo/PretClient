@@ -37,7 +37,7 @@ namespace winrt::PretClient
             card.Background(Theme::CardBrush());
             card.BorderBrush(Theme::CardStroke());
             card.BorderThickness(ThicknessHelper::FromUniformLength(1));
-            card.CornerRadius(CornerRadiusHelper::FromUniformRadius(12));
+            card.CornerRadius(CornerRadiusHelper::FromUniformRadius(10));
             card.Padding(ThicknessHelper::FromUniformLength(16));
             card.HorizontalAlignment(HorizontalAlignment::Stretch);
             card.Child(wrap);

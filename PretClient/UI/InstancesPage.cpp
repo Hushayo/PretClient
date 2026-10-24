@@ -233,7 +233,7 @@ namespace winrt::PretClient
                 pillBg = Theme::PillRunningBackground();
                 pillFg = Theme::PillRunningForeground().as<Microsoft::UI::Xaml::Media::Brush>();
                 frameStroke = Microsoft::UI::Xaml::Media::SolidColorBrush{
-                    Windows::UI::ColorHelper::FromArgb(110, 0x44, 0xBD, 0x32)
+                    Windows::UI::ColorHelper::FromArgb(110, 0x22, 0xC5, 0x5E)
                 }.as<Microsoft::UI::Xaml::Media::Brush>();
                 stateText = L"Running";
             }
@@ -252,7 +252,7 @@ namespace winrt::PretClient
             card.Background(Theme::CardBrush());
             card.BorderBrush(frameStroke);
             card.BorderThickness(ThicknessHelper::FromUniformLength(1));
-            card.CornerRadius(CornerRadiusHelper::FromUniformRadius(12));
+            card.CornerRadius(CornerRadiusHelper::FromUniformRadius(10));
             card.Padding(ThicknessHelper::FromUniformLength(0));
 
             // Left status rail + padded content.
@@ -383,7 +383,7 @@ namespace winrt::PretClient
             nameRow.Children().Append(name);
 
             Border badge{};
-            badge.CornerRadius(CornerRadiusHelper::FromUniformRadius(6));
+            badge.CornerRadius(CornerRadiusHelper::FromUniformRadius(8));
             badge.Padding(ThicknessHelper::FromLengths(8, 3, 8, 3));
             badge.VerticalAlignment(VerticalAlignment::Center);
             TextBlock badgeText{};
@@ -391,7 +391,7 @@ namespace winrt::PretClient
             badgeText.FontWeight(Windows::UI::Text::FontWeights::Bold());
             if (isModded)
             {
-                badge.Background(SolidColorBrush{ Windows::UI::ColorHelper::FromArgb(38, 0x44, 0xBD, 0x32) });
+                badge.Background(SolidColorBrush{ Windows::UI::ColorHelper::FromArgb(38, 0x22, 0xC5, 0x5E) });
                 badgeText.Foreground(Theme::GoodBrush());
                 std::wstring upper{ inst.loader };
                 for (auto& c : upper)
@@ -730,7 +730,7 @@ namespace winrt::PretClient
             empty.Background(Theme::SubtleFillBrush());
             empty.BorderBrush(Theme::CardStroke());
             empty.BorderThickness(ThicknessHelper::FromUniformLength(1));
-            empty.CornerRadius(CornerRadiusHelper::FromUniformRadius(12));
+            empty.CornerRadius(CornerRadiusHelper::FromUniformRadius(10));
             empty.Padding(ThicknessHelper::FromUniformLength(28));
 
             StackPanel col{};
@@ -1896,7 +1896,7 @@ namespace winrt::PretClient
                         card->stateLabel.Text(L"Running");
                         card->stateLabel.Foreground(Theme::PillRunningForeground());
                         card->frame.BorderBrush(Microsoft::UI::Xaml::Media::SolidColorBrush{
-                            Windows::UI::ColorHelper::FromArgb(110, 0x44, 0xBD, 0x32) });
+                            Windows::UI::ColorHelper::FromArgb(110, 0x22, 0xC5, 0x5E) });
                     }
                     else if (isPreparing)
                     {
