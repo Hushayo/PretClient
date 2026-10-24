@@ -11,6 +11,7 @@
 #include <cctype>
 #include <chrono>
 #include <coroutine>
+#include <functional>
 #include <fstream>
 #include <shellapi.h>
 #include <thread>
@@ -1247,48 +1248,7 @@ namespace winrt::PretClient
             m_dStatus = TextBlock{};
             m_dStatus.Opacity(0.7);
             m_dStatus.TextWrapping(TextWrapping::Wrap);
-            headCol.Children().Append(m_dStatus);
 
-            StackPanel btns{};
-            btns.Orientation(Orientation::Horizontal);
-            btns.Spacing(8);
-            m_dStart = Button{};
-            m_dStart.Content(box_value(L"Start"));
-            m_dStart.Style(Application::Current().Resources().Lookup(box_value(L"AccentButtonStyle")).as<Style>());
-            m_dStart.MinWidth(84);
-            m_dStart.Click([this](IInspectable const&, RoutedEventArgs const&) {
-                StartServer(m_detailId);
-            });
-            btns.Children().Append(m_dStart);
-            m_dStop = Button{};
-            m_dStop.Content(box_value(L"Stop"));
-            m_dStop.MinWidth(84);
-            m_dStop.Click([this](IInspectable const&, RoutedEventArgs const&) {
-                Server::StopConsole(m_detailId);
-                m_dStatus.Text(L"Stopping...");
-            });
-            btns.Children().Append(m_dStop);
-            Button folder{};
-            folder.Content(box_value(L"Folder"));
-            folder.MinWidth(84);
-            folder.Click([dir](IInspectable const&, RoutedEventArgs const&) {
-                try
-                {
-                    ShellExecuteW(nullptr, L"open", dir.wstring().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
-                }
-                catch (...)
-                {
-                }
-            });
-            btns.Children().Append(folder);
-            Button del{};
-            del.Content(box_value(L"Delete"));
-            del.MinWidth(84);
-            del.Click([this](IInspectable const&, RoutedEventArgs const&) {
-                DeleteServer(m_detailId);
-            });
-            btns.Children().Append(del);
-            headCol.Children().Append(btns);
             headCard.Child(headCol);
             m_detail.Children().Append(headCard);
 
@@ -1335,7 +1295,6 @@ namespace winrt::PretClient
             inRow.Children().Append(send);
             conCol.Children().Append(inRow);
             conCard.Child(conCol);
-            m_detail.Children().Append(conCard);
 
             // Resources card.
             Border resCard = DetailCard();
@@ -1391,7 +1350,16 @@ namespace winrt::PretClient
             addGraph(L"Storage", m_dDiskValue, m_dDiskLine,
                 Windows::UI::ColorHelper::FromArgb(0xFF, 0xE0, 0xA6, 0x3C));
             resCard.Child(resCol);
-            m_detail.Children().Append(resCard);
+
+            Pivot tabs{};
+            auto addTab = [&](hstring hdr, Microsoft::UI::Xaml::FrameworkElement const& content) {
+                PivotItem item{};
+                item.Header(box_value(hdr));
+                item.Content(content);
+                tabs.Items().Append(item);
+            };
+            addTab(L"Console", conCard);
+            addTab(L"Dashboard", resCard);
 
             // Content cards: plugins and/or mods depending on software.
             hstring modLoader = ModLoaderFor(entry.software);
@@ -1420,7 +1388,7 @@ namespace winrt::PretClient
                 m_dPluginResults.Spacing(6);
                 plugCol.Children().Append(m_dPluginResults);
                 plugCard.Child(plugCol);
-                m_detail.Children().Append(plugCard);
+                addTab(L"Plugins", plugCard);
             }
             if (!modLoader.empty())
             {
@@ -1447,7 +1415,7 @@ namespace winrt::PretClient
                 m_dModResults.Spacing(6);
                 modCol.Children().Append(m_dModResults);
                 modCard.Child(modCol);
-                m_detail.Children().Append(modCard);
+                addTab(L"Mods", modCard);
             }
             if (!PluginsFor(entry.software) && modLoader.empty())
             {
@@ -1457,7 +1425,7 @@ namespace winrt::PretClient
                 t.TextWrapping(TextWrapping::Wrap);
                 t.Text(L"No Modrinth content for this software. Drop jars into the folder manually.");
                 note.Child(t);
-                m_detail.Children().Append(note);
+                addTab(L"Overview", note);
             }
 
             // Files card.
@@ -1472,7 +1440,7 @@ namespace winrt::PretClient
             m_dFileList.Spacing(4);
             fileCol.Children().Append(m_dFileList);
             fileCard.Child(fileCol);
-            m_detail.Children().Append(fileCard);
+            addTab(L"Files", fileCard);
 
             // Backups card.
             Border bakCard = DetailCard();
@@ -1491,7 +1459,126 @@ namespace winrt::PretClient
             m_dBackupList.Spacing(4);
             bakCol.Children().Append(m_dBackupList);
             bakCard.Child(bakCol);
-            m_detail.Children().Append(bakCard);
+            addTab(L"Backups", bakCard);
+
+            // Extra management tabs for settings/network/modpacks.
+            Border settingsCard = DetailCard();
+            StackPanel sc{};
+            sc.Spacing(8);
+            sc.Children().Append(SectionHead(L"Server settings"));
+            TextBlock s1{};
+            s1.Text(hstring{ L"Name: " } + shown);
+            sc.Children().Append(s1);
+            TextBlock s2{};
+            s2.Text(hstring{ L"Software: " } + label);
+            sc.Children().Append(s2);
+            TextBlock s3{};
+            s3.Text(hstring{ L"Minecraft: " } + entry.mcVersion);
+            sc.Children().Append(s3);
+            settingsCard.Child(sc);
+            addTab(L"Settings", settingsCard);
+
+            Border netCard = DetailCard();
+            StackPanel nc{};
+            nc.Spacing(8);
+            nc.Children().Append(SectionHead(L"Network allocation"));
+            TextBlock n1{};
+            n1.Text(L"Default port: 25565 (change in server.properties, then restart).");
+            n1.TextWrapping(TextWrapping::Wrap);
+            nc.Children().Append(n1);
+            netCard.Child(nc);
+            addTab(L"Network", netCard);
+
+            Border mpCard = DetailCard();
+            StackPanel mpc{};
+            mpc.Spacing(8);
+            mpc.Children().Append(SectionHead(L"Modpacks"));
+            TextBlock mp1{};
+            mp1.Text(L"Install modpacks into this server via the Files tab or by dropping jars/archives here.");
+            mp1.TextWrapping(TextWrapping::Wrap);
+            mpc.Children().Append(mp1);
+            mpCard.Child(mpc);
+            addTab(L"Modpacks", mpCard);
+
+            // Sidebar + tabbed management replacing the long card wall.
+            Grid layout{};
+            layout.ColumnSpacing(16);
+            layout.ColumnDefinitions().Append(ColumnDefinition{});
+            layout.ColumnDefinitions().Append(ColumnDefinition{});
+            layout.ColumnDefinitions().GetAt(0).Width(GridLengthHelper::Auto());
+            layout.ColumnDefinitions().GetAt(1).Width(GridLengthHelper::FromValueAndType(1.0, GridUnitType::Star));
+
+            StackPanel sidebar{};
+            sidebar.Spacing(8);
+            sidebar.Width(132);
+
+            m_dStatus.Opacity(0.7);
+            m_dStatus.TextWrapping(TextWrapping::Wrap);
+            sidebar.Children().Append(m_dStatus);
+
+            auto makeSideBtn = [&](Symbol sym, hstring label,
+                std::function<void()> onClick) {
+                Button b{};
+                b.HorizontalAlignment(HorizontalAlignment::Stretch);
+                StackPanel sp{};
+                sp.Orientation(Orientation::Horizontal);
+                sp.Spacing(8);
+                sp.Children().Append(SymbolIcon(sym));
+                TextBlock t{};
+                t.Text(label);
+                sp.Children().Append(t);
+                b.Content(sp);
+                b.Click([onClick](IInspectable const&, RoutedEventArgs const&) {
+                    if (onClick)
+                        onClick();
+                });
+                return b;
+            };
+
+            m_dStart = makeSideBtn(Symbol::Play, L"Start", [this]() { StartServer(m_detailId); });
+            sidebar.Children().Append(m_dStart);
+            Button reboot = makeSideBtn(Symbol::Refresh, L"Reboot", [this]() {
+                Server::StopConsole(m_detailId);
+                if (m_dStatus)
+                    m_dStatus.Text(L"Rebooting...");
+                std::thread([this]() {
+                    std::this_thread::sleep_for(std::chrono::seconds(2));
+                    try
+                    {
+                        if (m_ui)
+                            m_ui.TryEnqueue([this]() { StartServer(m_detailId); });
+                    }
+                    catch (...)
+                    {
+                    }
+                }).detach();
+            });
+            sidebar.Children().Append(reboot);
+            m_dStop = makeSideBtn(Symbol::Stop, L"Stop", [this]() {
+                Server::StopConsole(m_detailId);
+                if (m_dStatus)
+                    m_dStatus.Text(L"Stopping...");
+            });
+            sidebar.Children().Append(m_dStop);
+            Button folderSide = makeSideBtn(Symbol::Folder, L"Folder", [dir]() {
+                try
+                {
+                    ShellExecuteW(nullptr, L"open", dir.wstring().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+                }
+                catch (...)
+                {
+                }
+            });
+            sidebar.Children().Append(folderSide);
+            Button deleteSide = makeSideBtn(Symbol::Clear, L"Delete", [this]() { DeleteServer(m_detailId); });
+            sidebar.Children().Append(deleteSide);
+
+            Grid::SetColumn(sidebar, 0);
+            layout.Children().Append(sidebar);
+            Grid::SetColumn(tabs, 1);
+            layout.Children().Append(tabs);
+
+            m_detail.Children().Append(layout);
 
             auto bit = m_backlog.find(std::wstring{ m_detailId });
             if (bit != m_backlog.end())
