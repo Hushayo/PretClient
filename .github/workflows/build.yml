@@ -61,11 +61,10 @@ jobs:
           $crtRoot = Join-Path $vs 'VC\Redist\MSVC'
           $crt = Get-ChildItem $crtRoot -Directory |
             Sort-Object Name -Descending |
-            ForEach-Object { Join-Path $_.FullName 'x64\Microsoft.VC*.CRT' } |
-            Where-Object { Test-Path $_ } |
+            ForEach-Object { Get-ChildItem (Join-Path $_.FullName 'x64') -Directory -Filter 'Microsoft.VC*.CRT' -ErrorAction SilentlyContinue } |
             Select-Object -First 1
           if (-not $crt) { throw "VC++ x64 redist folder not found under $crtRoot" }
-          $dlls = Get-ChildItem $crt -Filter *.dll
+          $dlls = Get-ChildItem $crt.FullName -Filter *.dll
           if (-not $dlls) { throw "No VC++ runtime DLLs found in $crt" }
           Copy-Item $dlls.FullName 'x64/Release' -Force
           $dlls | ForEach-Object { Write-Host "bundled $($_.Name)" }
