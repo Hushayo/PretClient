@@ -29,7 +29,7 @@ ArchitecturesAllowed=x64compatible
 WizardStyle=modern
 
 [Files]
-Source: "..\x64\Release\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "*.pdb,*.ilk,*.exp,*.lib,*.iobj,*.ipdb"
+Source: "..\x64\Release\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "*.pdb,*.ilk,*.exp,*.lib,*.iobj,*.ipdb,RestartAgent.exe"
 
 [Icons]
 Name: "{autoprograms}\PretClient"; Filename: "{app}\PretClient.exe"

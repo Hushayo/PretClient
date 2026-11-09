@@ -271,11 +271,14 @@
   <ItemDefinitionGroup>
     <!-- Ship the exe icon + loader tile art next to the binary (the title
          bar and the instance tiles pick them up at runtime; Setup.iss
-         recurses them into the installer). -->
+         recurses them into the installer). Also ship the VC++ runtime
+         app-local so the app runs on clean machines without the VC++
+         Redistributable installed (winget validation VM). -->
     <PostBuildEvent>
       <Command>copy /Y "$(ProjectDir)icon.ico" "$(OutDir)icon.ico"
 if not exist "$(OutDir)Assets" mkdir "$(OutDir)Assets"
-copy /Y "$(ProjectDir)Assets\*.png" "$(OutDir)Assets\"</Command>
+copy /Y "$(ProjectDir)Assets\*.png" "$(OutDir)Assets\"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-ChildItem '$(VCToolsRedistDir)$(Platform)\Microsoft.VC*.CRT\*.dll' | Copy-Item -Destination '$(OutDir)' -Force"</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
