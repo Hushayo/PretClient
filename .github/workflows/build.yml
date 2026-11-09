@@ -46,6 +46,33 @@ jobs:
       - name: Build x64 Release (unpackaged exe)
         run: msbuild PretClient.sln /restore /p:Configuration=Release /p:Platform=x64 /verbosity:minimal
 
+      # The app links the VC++ CRT dynamically (/MD) and WinUI 3 doesn't
+      # support static linking it, so ship the runtime app-local next to
+      # the exe. Clean machines (winget's validation VM) don't have the
+      # VC++ Redistributable installed, and without these DLLs the app
+      # exits with 0xC0000135 (STATUS_DLL_NOT_FOUND).
+      - name: Bundle VC++ runtime app-local
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          if (-not (Test-Path $vswhere)) { throw "vswhere not found" }
+          $vs = & $vswhere -latest -products * -property installationPath
+          if (-not $vs) { throw "Visual Studio installation not found" }
+          $crtRoot = Join-Path $vs 'VC\Redist\MSVC'
+          $crt = Get-ChildItem $crtRoot -Directory |
+            Sort-Object Name -Descending |
+            ForEach-Object { Join-Path $_.FullName 'x64\Microsoft.VC*.CRT' } |
+            Where-Object { Test-Path $_ } |
+            Select-Object -First 1
+          if (-not $crt) { throw "VC++ x64 redist folder not found under $crtRoot" }
+          $dlls = Get-ChildItem $crt -Filter *.dll
+          if (-not $dlls) { throw "No VC++ runtime DLLs found in $crt" }
+          Copy-Item $dlls.FullName 'x64/Release' -Force
+          $dlls | ForEach-Object { Write-Host "bundled $($_.Name)" }
+          foreach ($required in 'vcruntime140.dll','vcruntime140_1.dll','msvcp140.dll') {
+            if (-not (Test-Path "x64/Release/$required")) { throw "$required missing from x64/Release" }
+          }
+
       - name: List outputs
         if: always()
         run: |
